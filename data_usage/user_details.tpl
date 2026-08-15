@@ -14,7 +14,7 @@ table th {
                 <i class="fa fa-arrow-left"></i> Back
             </a>
             <h3 class="data-usage-header-title" style="margin: 0; font-size: 22px; font-weight: 700; color: #1e293b; cursor: pointer;" title="Data Usage Engine">
-                <i class="fa fa-user text-primary"></i> User Details &mdash; {$username}
+                <i class="fa fa-user text-primary"></i> User Details &mdash; {$username} {if $targetRouter}<span style="font-size: 16px; font-weight: normal; color: #64748b;">({$targetRouter->name})</span>{/if}
             </h3>
         </div>
         <div class="btn-group">
@@ -129,7 +129,7 @@ table th {
                 <span style="font-weight: 700;">Session Logs (Recent 100 Sessions)</span>
                 <div style="display: flex; align-items: center; gap: 6px;">
                     {if !empty($routers) && count($routers) > 0}
-                    <button type="button" class="btn btn-xs btn-default" onclick="checkLiveStatus('{$username}', '{$userRouterId}', '{$userService}', this)" style="font-weight: 600;">
+                    <button type="button" class="btn btn-xs btn-default" onclick="checkLiveStatus('{$username}', '{$userRouterId}', 'all', this)" style="font-weight: 600;">
                         <i class="fa fa-refresh"></i> Refresh Live Status
                     </button>
                     {/if}

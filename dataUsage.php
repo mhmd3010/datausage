@@ -18,6 +18,7 @@ register_menu("", true, "data_usage_sync", "", "", '', '', ['SuperAdmin', 'Admin
 register_menu("", true, "data_usage_export", "", "", '', '', ['SuperAdmin', 'Admin']);
 register_menu("", true, "data_usage_disconnect", "", "", '', '', ['SuperAdmin', 'Admin']);
 register_menu("", true, "data_usage_install_poller", "", "", '', '', ['SuperAdmin', 'Admin']);
+register_menu("", true, "data_usage_manage_profile_scripts", "", "", '', '', ['SuperAdmin', 'Admin']);
 register_menu("", true, "data_usage_live_status", "", "", '', '', ['SuperAdmin', 'Admin']);
 register_menu("", true, "data_usage_async_routers_status", "", "", '', '', ['SuperAdmin', 'Admin']);
 
@@ -27,8 +28,8 @@ register_menu("", false, "data_usage_collector", "", "");
 register_menu("", false, "data_usage_api", "", "");
 register_menu("", false, "dataUsage_webhook", "", "");
 
-define('DATA_USAGE_PLUGIN_VERSION', '1.0.5');
-define('DATA_USAGE_DB_VERSION', '1.0.3');
+define('DATA_USAGE_PLUGIN_VERSION', '1.0.6');
+define('DATA_USAGE_DB_VERSION', '1.0.4');
 
 /**
  * Auto-initialize Database Tables
@@ -100,12 +101,18 @@ function data_usage_init_db()
         profile VARCHAR(100) DEFAULT '',
         comment VARCHAR(255) DEFAULT '',
         disabled TINYINT(1) NOT NULL DEFAULT 0,
+        missing_since DATETIME DEFAULT NULL,
         last_synced DATETIME DEFAULT NULL,
         UNIQUE KEY uk_router_user_svc (router_id, username, service),
         INDEX idx_router_user (router_id, username),
         INDEX idx_username (username),
-        INDEX idx_service (service)
+        INDEX idx_service (service),
+        INDEX idx_missing (missing_since)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    try {
+        ORM::raw_execute("ALTER TABLE tbl_data_usage_router_users ADD COLUMN IF NOT EXISTS missing_since DATETIME DEFAULT NULL");
+    } catch (Exception $e) {}
 
     data_usage_set_config('data_usage_db_version', DATA_USAGE_DB_VERSION);
 }
@@ -735,6 +742,7 @@ function data_usage_get_direct_live_sessions($router)
             $pppActive = $client->sendSync(new RouterOS\Request('/ppp/active/print'));
             $pppMap = [];
             foreach ($pppActive as $p) {
+                if ($p->getType() !== RouterOS\Response::TYPE_DATA) continue;
                 $uName = $p->getProperty('name');
                 if (!empty($uName)) {
                     $rawSid = $p->getProperty('session-id') ?: ($p->getProperty('.id') ?: $uName);
@@ -750,6 +758,7 @@ function data_usage_get_direct_live_sessions($router)
 
             $interfaces = $client->sendSync(new RouterOS\Request('/interface/print'));
             foreach ($interfaces as $iface) {
+                if ($iface->getType() !== RouterOS\Response::TYPE_DATA) continue;
                 $ifType = $iface->getProperty('type');
                 $ifName = $iface->getProperty('name');
 
@@ -802,6 +811,7 @@ function data_usage_get_direct_live_sessions($router)
         try {
             $hsActive = $client->sendSync(new RouterOS\Request('/ip/hotspot/active/print'));
             foreach ($hsActive as $hs) {
+                if ($hs->getType() !== RouterOS\Response::TYPE_DATA) continue;
                 $uName = $hs->getProperty('user');
                 if (!empty($uName)) {
                     $mac    = $hs->getProperty('mac-address') ?: '';
@@ -1208,14 +1218,26 @@ function data_usage_user()
     $admin = Admin::_info();
     data_usage_init_db();
 
-    $username = isset($_GET['username']) ? trim($_GET['username']) : '';
+    $username = trim($_POST['username'] ?? $_GET['username'] ?? '');
+    $routerId = (int)($_POST['router_id'] ?? $_GET['router_id'] ?? $_POST['router'] ?? $_GET['router'] ?? 0);
+
     if (empty($username)) {
-        r2(getUrl('plugin/data_usage_admin'), 'e', 'Username required');
+        r2(getUrl('plugin/data_usage_admin'), 'e', 'Username is required');
+    }
+
+    $targetRouter = null;
+    if ($routerId > 0) {
+        $targetRouter = ORM::for_table('tbl_routers')->where('enabled', '1')->find_one($routerId);
+    }
+
+    $pageTitle = 'Data Usage - User: ' . htmlspecialchars($username);
+    if ($targetRouter) {
+        $pageTitle .= ' (' . htmlspecialchars($targetRouter->name) . ')';
     }
 
     $ui->assign('_system_menu', 'plugin/data_usage_admin');
     $ui->assign('_admin', $admin);
-    $ui->assign('_title', 'Data Usage - User: ' . htmlspecialchars($username));
+    $ui->assign('_title', $pageTitle);
 
     $ui->assign('xheader', '<link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.11.3/css/dataTables.bootstrap.min.css">');
     $ui->assign('xfooter', '<script src="https://cdn.datatables.net/1.11.3/js/jquery.dataTables.min.js"></script><script src="https://cdn.datatables.net/1.11.3/js/dataTables.bootstrap.min.js"></script>');
@@ -1236,7 +1258,11 @@ function data_usage_user()
     $order = isset($allowedSort[$rawOrder]) ? $rawOrder : 'start_time';
     $orderby = in_array(strtolower($rawOrderBy), ['asc', 'desc']) ? strtolower($rawOrderBy) : 'desc';
 
+    // Scoped session logs query
     $sessQuery = ORM::for_table('tbl_data_usage_sessions')->where('username', $username);
+    if ($routerId > 0) {
+        $sessQuery->where('router_id', $routerId);
+    }
     $dbSortCol = $allowedSort[$order];
     if ($orderby === 'asc') {
         $sessQuery->order_by_asc($dbSortCol);
@@ -1261,12 +1287,12 @@ function data_usage_user()
         $sessionsFormatted[] = $item;
     }
 
-    // Daily summary for this user (last 30 days)
-    $dailySummary = ORM::for_table('tbl_data_usage_daily')
-        ->where('username', $username)
-        ->order_by_desc('usage_date')
-        ->limit(30)
-        ->find_many();
+    // Daily summary for this user (last 30 days) - strictly scoped by router_id
+    $dailyQuery = ORM::for_table('tbl_data_usage_daily')->where('username', $username);
+    if ($routerId > 0) {
+        $dailyQuery->where('router_id', $routerId);
+    }
+    $dailySummary = $dailyQuery->order_by_desc('usage_date')->limit(30)->find_many();
 
     $dailyFormatted = [];
     foreach ($dailySummary as $d) {
@@ -1278,25 +1304,40 @@ function data_usage_user()
     }
 
     // Find default router and service for this user
-    $latestSession = ORM::for_table('tbl_data_usage_sessions')
-        ->where('username', $username)
-        ->order_by_desc('last_seen')
-        ->find_one();
-    $userRouterId = $latestSession ? $latestSession->router_id : 0;
+    $latestQuery = ORM::for_table('tbl_data_usage_sessions')->where('username', $username);
+    if ($routerId > 0) {
+        $latestQuery->where('router_id', $routerId);
+    }
+    $latestSession = $latestQuery->order_by_desc('last_seen')->find_one();
+    $userRouterId = $routerId > 0 ? $routerId : ($latestSession ? $latestSession->router_id : 0);
     $userService = $latestSession ? $latestSession->service : 'PPPoE';
 
-    // Find active session for this user
-    $activeSession = ORM::for_table('tbl_data_usage_sessions')
+    if ($routerId > 0) {
+        $rUser = ORM::for_table('tbl_data_usage_router_users')
+            ->where('router_id', $routerId)
+            ->where('username', $username)
+            ->find_one();
+        if ($rUser && !empty($rUser->service)) {
+            $userService = $rUser->service;
+        }
+    }
+
+    // Find active session for this user strictly on this router
+    $activeQuery = ORM::for_table('tbl_data_usage_sessions')
         ->where('username', $username)
-        ->where('status', 'active')
-        ->order_by_desc('last_seen')
-        ->find_one();
+        ->where('status', 'active');
+    if ($routerId > 0) {
+        $activeQuery->where('router_id', $routerId);
+    }
+    $activeSession = $activeQuery->order_by_desc('last_seen')->find_one();
     $activeSessionId = $activeSession ? $activeSession->session_id : '';
     $activeRouterId = $activeSession ? $activeSession->router_id : $userRouterId;
     $activeService = $activeSession ? $activeSession->service : $userService;
     $routers = ORM::for_table('tbl_routers')->where('enabled', '1')->find_many();
 
     $ui->assign('username', $username);
+    $ui->assign('routerId', $routerId);
+    $ui->assign('targetRouter', $targetRouter);
     $ui->assign('customer', $customer);
     $ui->assign('order', $order);
     $ui->assign('orderby', $orderby);
@@ -1326,7 +1367,7 @@ function data_usage_scripts()
 
     $ui->assign('_system_menu', 'plugin/data_usage_admin');
     $ui->assign('_admin', $admin);
-    $ui->assign('_title', 'Data Usage - MikroTik Setup Scripts');
+    $ui->assign('_title', 'Data Usage - Settings & MikroTik Setup');
 
     $routers = ORM::for_table('tbl_routers')->where('enabled', '1')->find_many();
     $selectedRouterId = isset($_GET['router_id']) ? (int)$_GET['router_id'] : ($routers[0]->id ?? 1);
@@ -1334,21 +1375,196 @@ function data_usage_scripts()
     $appUrl = rtrim(APP_URL, '/');
     $webhookUrl = $appUrl . '/?_route=plugin/data_usage_webhook';
 
+    $targetRouter = ORM::for_table('tbl_routers')->where('enabled', '1')->find_one($selectedRouterId);
+    $pppProfiles = [];
+    $hsProfiles = [];
+    $routerOnline = false;
+
+    if ($targetRouter) {
+        try {
+            $client = data_usage_get_mikrotik_client($targetRouter, 6.0);
+            if ($client) {
+                $routerOnline = true;
+                // 1. Fetch PPPoE profiles
+                try {
+                    $res = $client->sendSync(new RouterOS\Request('/ppp/profile/print'));
+                    foreach ($res as $p) {
+                        $pName = (string)$p->getProperty('name');
+                        if (empty($pName)) continue;
+                        $onUp = (string)$p->getProperty('on-up');
+                        $onDown = (string)$p->getProperty('on-down');
+                        $installed = (strpos($onUp, 'data_usage_webhook') !== false || strpos($onUp, 'dataUsage') !== false);
+                        $pppProfiles[] = [
+                            'name'      => $pName,
+                            'installed' => $installed,
+                            'on_up'     => $onUp,
+                            'on_down'   => $onDown
+                        ];
+                    }
+                } catch (Exception $eP) {}
+
+                // 2. Fetch Hotspot user profiles
+                try {
+                    $res = $client->sendSync(new RouterOS\Request('/ip/hotspot/user/profile/print'));
+                    foreach ($res as $p) {
+                        $pName = (string)$p->getProperty('name');
+                        if (empty($pName)) continue;
+                        $onLogin = (string)$p->getProperty('on-login');
+                        $onLogout = (string)$p->getProperty('on-logout');
+                        $installed = (strpos($onLogin, 'data_usage_webhook') !== false || strpos($onLogin, 'dataUsage') !== false);
+                        $hsProfiles[] = [
+                            'name'      => $pName,
+                            'installed' => $installed,
+                            'on_login'  => $onLogin,
+                            'on_logout' => $onLogout
+                        ];
+                    }
+                } catch (Exception $eH) {}
+            }
+        } catch (Exception $e) {}
+    }
+
     $ui->assign('routers', $routers);
     $ui->assign('selectedRouterId', $selectedRouterId);
+    $ui->assign('targetRouter', $targetRouter);
+    $ui->assign('routerOnline', $routerOnline);
+    $ui->assign('pppProfiles', $pppProfiles);
+    $ui->assign('hsProfiles', $hsProfiles);
     $ui->assign('webhookUrl', $webhookUrl);
     $ui->assign('appUrl', $appUrl);
     $ui->assign('cronInfo', data_usage_get_cron_info());
+    $ui->assign('csrf_token', Csrf::generateAndStoreToken());
 
     $ui->display('data_usage/scripts.tpl');
 }
 
 /**
- * 4. Live Status Check (On-Demand Single User Direct MikroTik Query)
+ * 4.1 Manage Profile Scripts (Selective Apply / Remove on PPP & Hotspot Profiles)
+ */
+function data_usage_manage_profile_scripts()
+{
+    _admin();
+    $csrf_token = $_POST['csrf_token'] ?? '';
+    if (!Csrf::check($csrf_token)) {
+        r2(getUrl('plugin/data_usage_scripts'), 'e', 'Security token expired. Please try again.');
+    }
+
+    $routerId = (int)($_POST['router_id'] ?? 0);
+    $action = $_POST['action'] ?? 'install'; // 'install' or 'remove'
+    $selectedPpp = (array)($_POST['ppp_profiles'] ?? []);
+    $selectedHs = (array)($_POST['hs_profiles'] ?? []);
+
+    if ($routerId <= 0) {
+        r2(getUrl('plugin/data_usage_scripts'), 'e', 'Target router required.');
+    }
+
+    if (empty($selectedPpp) && empty($selectedHs)) {
+        r2(getUrl('plugin/data_usage_scripts&router_id=' . $routerId), 'w', 'Please select at least one profile.');
+    }
+
+    $router = ORM::for_table('tbl_routers')->where('enabled', '1')->find_one($routerId);
+    if (!$router) {
+        r2(getUrl('plugin/data_usage_scripts'), 'e', 'Router not found.');
+    }
+
+    $client = data_usage_get_mikrotik_client($router, 7.0);
+    if (!$client) {
+        r2(getUrl('plugin/data_usage_scripts&router_id=' . $routerId), 'e', 'Cannot connect to router via API.');
+    }
+
+    $appUrl = rtrim(APP_URL, '/');
+    $webhookUrl = $appUrl . '/?_route=plugin/data_usage_webhook';
+
+    // Script definitions
+    $pppOnUp = ':local routerId "' . $routerId . '";' . "\n"
+        . ':local serverUrl "' . $webhookUrl . '";' . "\n"
+        . ':local sid [/ppp active get [find name=$user] session-id];' . "\n"
+        . ':local iface [/interface find where name=$interface];' . "\n"
+        . ':local linkUp [/interface get $iface last-link-up-time];' . "\n"
+        . ':if ($sid = "") do={ :set sid $user; };' . "\n"
+        . ':log info ("dataUsage [PPPoE on-up]: User " . $user . " connected (IP: " . $address . ", MAC: " . $caller-id . ", SID: " . $sid . ")");' . "\n"
+        . '/tool fetch url=$serverUrl http-method=post http-data="action=session-start&router=$routerId&service=PPPoE&username=$user&session_id=$sid&mac=$caller-id&ip=$address&start_time=$linkUp" keep-result=no;';
+
+    $pppOnDown = ':local routerId "' . $routerId . '";' . "\n"
+        . ':local serverUrl "' . $webhookUrl . '";' . "\n"
+        . ':local secret [/ppp secret find where name=$user];' . "\n"
+        . ':local loggedOut [/ppp secret get $secret last-logged-out];' . "\n"
+        . ':local discReason [/ppp secret get $secret last-disconnect-reason];' . "\n"
+        . ':log info ("dataUsage [PPPoE on-down]: User " . $user . " disconnected (" . $discReason . ")");' . "\n"
+        . '/tool fetch url=$serverUrl http-method=post http-data="action=session-end&router=$routerId&service=PPPoE&username=$user&closed_time=$loggedOut&close_reason=$discReason" keep-result=no;';
+
+    $hsOnLogin = ':local routerId "' . $routerId . '";' . "\n"
+        . ':local serverUrl "' . $webhookUrl . '";' . "\n"
+        . ':log info ("dataUsage [Hotspot on-login]: User " . $user . " logged in (IP: " . $address . ", MAC: " . $"mac-address" . ")");' . "\n"
+        . '/tool fetch url=$serverUrl http-method=post http-data="action=session-start&router=$routerId&service=Hotspot&username=$user&mac=$"mac-address"&ip=$address" keep-result=no;';
+
+    $hsOnLogout = ':local routerId "' . $routerId . '";' . "\n"
+        . ':local serverUrl "' . $webhookUrl . '";' . "\n"
+        . ':log info ("dataUsage [Hotspot on-logout]: User " . $user . " logged out (Cause: " . $cause . ")");' . "\n"
+        . '/tool fetch url=$serverUrl http-method=post http-data="action=session-end&router=$routerId&service=Hotspot&username=$user&mac=$"mac-address"&ip=$address&uptime_secs=$"uptime-secs"&bytes_in=$"bytes-in"&bytes_out=$"bytes-out"&close_reason=$cause" keep-result=no;';
+
+    $updatedCount = 0;
+
+    // 1. Process PPPoE Profiles
+    if (!empty($selectedPpp)) {
+        try {
+            $res = $client->sendSync(new RouterOS\Request('/ppp/profile/print'));
+            foreach ($res as $p) {
+                $pName = (string)$p->getProperty('name');
+                if (in_array($pName, $selectedPpp)) {
+                    $setReq = new RouterOS\Request('/ppp/profile/set');
+                    $setReq->setArgument('numbers', $p->getProperty('.id'));
+                    if ($action === 'install') {
+                        $setReq->setArgument('on-up', $pppOnUp);
+                        $setReq->setArgument('on-down', $pppOnDown);
+                    } else {
+                        $setReq->setArgument('on-up', '');
+                        $setReq->setArgument('on-down', '');
+                    }
+                    $client->sendSync($setReq);
+                    $updatedCount++;
+                }
+            }
+        } catch (Exception $eP) {}
+    }
+
+    // 2. Process Hotspot User Profiles
+    if (!empty($selectedHs)) {
+        try {
+            $res = $client->sendSync(new RouterOS\Request('/ip/hotspot/user/profile/print'));
+            foreach ($res as $p) {
+                $pName = (string)$p->getProperty('name');
+                if (in_array($pName, $selectedHs)) {
+                    $setReq = new RouterOS\Request('/ip/hotspot/user/profile/set');
+                    $setReq->setArgument('numbers', $p->getProperty('.id'));
+                    if ($action === 'install') {
+                        $setReq->setArgument('on-login', $hsOnLogin);
+                        $setReq->setArgument('on-logout', $hsOnLogout);
+                    } else {
+                        $setReq->setArgument('on-login', '');
+                        $setReq->setArgument('on-logout', '');
+                    }
+                    $client->sendSync($setReq);
+                    $updatedCount++;
+                }
+            }
+        } catch (Exception $eH) {}
+    }
+
+    $msg = ($action === 'install') 
+        ? 'Successfully installed scripts on ' . $updatedCount . ' profile(s).'
+        : 'Successfully removed scripts from ' . $updatedCount . ' profile(s).';
+
+    r2(getUrl('plugin/data_usage_scripts&router_id=' . $routerId), 's', $msg);
+}
+
+/**
+ * 4.2 Live Status Check (On-Demand Single User Direct MikroTik Query)
  */
 function data_usage_live_status()
 {
     _admin();
+    session_write_close();
     data_usage_init_db();
     header('Content-Type: application/json; charset=utf-8');
 
@@ -1372,7 +1588,7 @@ function data_usage_live_status()
     exit;
 }
 
-function data_usage_query_live_user_status($router, $username, $service = 'PPPoE')
+function data_usage_query_live_user_status($router, $username, $service = 'all')
 {
     $now = date('Y-m-d H:i:s');
     $today = date('Y-m-d');
@@ -1383,253 +1599,283 @@ function data_usage_query_live_user_status($router, $username, $service = 'PPPoE
             return ['status' => 'error', 'message' => 'Failed to connect to MikroTik API (' . $router->name . ')'];
         }
 
-        if ($service === 'Hotspot') {
-            // Query /ip/hotspot/active
-            $req = new RouterOS\Request('/ip/hotspot/active/print');
-            $req->setQuery(RouterOS\Query::where('user', $username));
-            $hsRes = $client->sendSync($req);
+        $checkPppoe = ($service === 'all' || strtolower($service) === 'pppoe');
+        $checkHotspot = ($service === 'all' || strtolower($service) === 'hotspot');
 
-            $activeHs = null;
-            foreach ($hsRes as $hs) {
-                $activeHs = $hs;
-                break;
-            }
+        $pppoeResult = null;
+        $hotspotResult = null;
 
-            if ($activeHs) {
-                $mac    = $activeHs->getProperty('mac-address') ?: '';
-                $ip     = $activeHs->getProperty('address') ?: '';
-                $uptime = $activeHs->getProperty('uptime') ?: '';
-                $rawRx  = (float)$activeHs->getProperty('bytes-in');  // Upload (Client In)
-                $rawTx  = (float)$activeHs->getProperty('bytes-out'); // Download (Client Out)
+        // 1. Audit PPPoE Independently
+        if ($checkPppoe) {
+            try {
+                $req = new RouterOS\Request('/ppp/active/print');
+                $req->setQuery(RouterOS\Query::where('name', $username));
+                $pppRes = $client->sendSync($req);
 
-                // Look up or create active session row
-                $session = ORM::for_table('tbl_data_usage_sessions')
-                    ->where('router_id', $router->id)
-                    ->where('username', $username)
-                    ->where('service', 'Hotspot')
-                    ->where('status', 'active');
-                if (!empty($mac)) {
-                    $session->where('mac_address', $mac);
-                }
-                $session = $session->find_one();
-
-                if ($session) {
-                    $deltaIn = max(0, $rawRx - $session->last_bytes_in);
-                    $deltaOut = max(0, $rawTx - $session->last_bytes_out);
-                    if ($deltaIn > 0 || $deltaOut > 0) {
-                        data_usage_add_daily_delta($router->id, $username, 'Hotspot', $mac ?: $session->mac_address, $deltaIn, $deltaOut, $today);
-                    }
-
-                    $session->bytes_in = $rawRx;
-                    $session->bytes_out = $rawTx;
-                    $session->total_bytes = $rawRx + $rawTx;
-                    $session->last_bytes_in = $rawRx;
-                    $session->last_bytes_out = $rawTx;
-                    $session->last_seen = $now;
-                    $session->uptime = $uptime ?: $session->uptime;
-                    $session->ip_address = $ip ?: $session->ip_address;
-                    $session->mac_address = $mac ?: $session->mac_address;
-                    $session->save();
-                } else {
-                    $calcStartTime = date('Y-m-d H:i:s', time() - data_usage_uptime_to_seconds($uptime));
-                    $sessionId = data_usage_generate_hotspot_session_id($username, $mac, strtotime($calcStartTime));
-
-                    $session = ORM::for_table('tbl_data_usage_sessions')->create();
-                    $session->session_id = $sessionId;
-                    $session->router_id = $router->id;
-                    $session->router_name = $router->name;
-                    $session->username = $username;
-                    $session->service = 'Hotspot';
-                    $session->ip_address = $ip;
-                    $session->mac_address = $mac;
-                    $session->uptime = $uptime;
-                    $session->status = 'active';
-                    $session->bytes_in = $rawRx;
-                    $session->bytes_out = $rawTx;
-                    $session->total_bytes = $rawRx + $rawTx;
-                    $session->last_bytes_in = $rawRx;
-                    $session->last_bytes_out = $rawTx;
-                    $session->start_time = $calcStartTime;
-                    $session->last_seen = $now;
-                    $session->save();
-
-                    if ($rawRx > 0 || $rawTx > 0) {
-                        data_usage_add_daily_delta($router->id, $username, 'Hotspot', $mac, $rawRx, $rawTx, $today);
-                    }
-                }
-
-                return [
-                    'status'     => 'success',
-                    'online'     => true,
-                    'service'    => 'Hotspot',
-                    'session_id' => $session->session_id,
-                    'ip'         => $ip,
-                    'mac'        => $mac,
-                    'uptime'     => $uptime,
-                    'upload'     => data_usage_format_bytes($rawRx),
-                    'download'   => data_usage_format_bytes($rawTx),
-                    'total'      => data_usage_format_bytes($rawRx + $rawTx),
-                    'start_time' => $session->start_time
-                ];
-            } else {
-                // User is offline: close any active DB session for this user
-                $activeDb = ORM::for_table('tbl_data_usage_sessions')
-                    ->where('router_id', $router->id)
-                    ->where('username', $username)
-                    ->where('service', 'Hotspot')
-                    ->where('status', 'active')
-                    ->find_many();
-
-                foreach ($activeDb as $act) {
-                    $act->status = 'closed';
-                    $act->closed_time = $act->last_seen ?: $now;
-                    $act->close_reason = 'live_check_offline';
-                    $act->save();
-                }
-
-                return [
-                    'status'  => 'success',
-                    'online'  => false,
-                    'service' => 'Hotspot',
-                    'message' => 'User is currently offline'
-                ];
-            }
-        } else {
-            // PPPoE: Query /ppp/active
-            $req = new RouterOS\Request('/ppp/active/print');
-            $req->setQuery(RouterOS\Query::where('name', $username));
-            $pppRes = $client->sendSync($req);
-
-            $activePpp = null;
-            foreach ($pppRes as $p) {
-                $activePpp = $p;
-                break;
-            }
-
-            if ($activePpp) {
-                $rawSid   = $activePpp->getProperty('session-id') ?: ($activePpp->getProperty('.id') ?: $username);
-                $callerId = $activePpp->getProperty('caller-id') ?: '';
-                $ip       = $activePpp->getProperty('address') ?: '';
-                $uptime   = $activePpp->getProperty('uptime') ?: '';
-                $sId      = data_usage_clean_session_id($rawSid, $username, $callerId);
-
-                // Fetch dynamic interface stats & real last-link-up-time
-                $rawTx = 0; $rawRx = 0; $linkUp = '';
-                try {
-                    $ifReq = new RouterOS\Request('/interface/print');
-                    $ifReq->setQuery(RouterOS\Query::where('name', '<pppoe-' . $username . '>'));
-                    $ifRes = $client->sendSync($ifReq);
-                    foreach ($ifRes as $iface) {
-                        $rawTx  = (float)$iface->getProperty('tx-byte'); // Client download
-                        $rawRx  = (float)$iface->getProperty('rx-byte'); // Client upload
-                        $linkUp = $iface->getProperty('last-link-up-time') ?: '';
+                $activePpp = null;
+                foreach ($pppRes as $p) {
+                    if ($p->getType() === RouterOS\Response::TYPE_DATA && !empty($p->getProperty('name'))) {
+                        $activePpp = $p;
                         break;
                     }
-                } catch (Exception $eIf) {}
+                }
 
-                // Look up active session
-                $session = ORM::for_table('tbl_data_usage_sessions')
-                    ->where('router_id', $router->id)
-                    ->where('session_id', $sId)
-                    ->where('status', 'active')
-                    ->find_one();
+                if ($activePpp) {
+                    $rawSid   = $activePpp->getProperty('session-id') ?: ($activePpp->getProperty('.id') ?: $username);
+                    $callerId = $activePpp->getProperty('caller-id') ?: '';
+                    $ip       = $activePpp->getProperty('address') ?: '';
+                    $uptime   = $activePpp->getProperty('uptime') ?: '';
+                    $sId      = data_usage_clean_session_id($rawSid, $username, $callerId);
 
-                if ($session) {
-                    $deltaIn = max(0, $rawRx - $session->last_bytes_in);
-                    $deltaOut = max(0, $rawTx - $session->last_bytes_out);
-                    if ($deltaIn > 0 || $deltaOut > 0) {
-                        data_usage_add_daily_delta($router->id, $username, 'PPPoE', $callerId ?: $session->mac_address, $deltaIn, $deltaOut, $today);
+                    $rawTx = 0; $rawRx = 0; $linkUp = '';
+                    try {
+                        $ifReq = new RouterOS\Request('/interface/print');
+                        $ifReq->setQuery(RouterOS\Query::where('name', '<pppoe-' . $username . '>'));
+                        $ifRes = $client->sendSync($ifReq);
+                        foreach ($ifRes as $iface) {
+                            $rawTx  = (float)$iface->getProperty('tx-byte');
+                            $rawRx  = (float)$iface->getProperty('rx-byte');
+                            $linkUp = $iface->getProperty('last-link-up-time') ?: '';
+                            break;
+                        }
+                    } catch (Exception $eIf) {}
+
+                    $session = ORM::for_table('tbl_data_usage_sessions')
+                        ->where('router_id', $router->id)
+                        ->where('session_id', $sId)
+                        ->where('status', 'active')
+                        ->find_one();
+
+                    if ($session) {
+                        $deltaIn = max(0, $rawRx - $session->last_bytes_in);
+                        $deltaOut = max(0, $rawTx - $session->last_bytes_out);
+                        if ($deltaIn > 0 || $deltaOut > 0) {
+                            data_usage_add_daily_delta($router->id, $username, 'PPPoE', $callerId ?: $session->mac_address, $deltaIn, $deltaOut, $today);
+                        }
+
+                        $session->bytes_in = $rawRx;
+                        $session->bytes_out = $rawTx;
+                        $session->total_bytes = $rawRx + $rawTx;
+                        $session->last_bytes_in = $rawRx;
+                        $session->last_bytes_out = $rawTx;
+                        $session->last_seen = $now;
+                        $session->uptime = $uptime ?: $session->uptime;
+                        $session->ip_address = $ip ?: $session->ip_address;
+                        $session->mac_address = $callerId ?: $session->mac_address;
+                        $session->save();
+                    } else {
+                        $realStartTime = data_usage_parse_routeros_datetime($linkUp, $uptime);
+                        $session = ORM::for_table('tbl_data_usage_sessions')->create();
+                        $session->session_id = $sId;
+                        $session->router_id = $router->id;
+                        $session->router_name = $router->name;
+                        $session->username = $username;
+                        $session->service = 'PPPoE';
+                        $session->ip_address = $ip;
+                        $session->mac_address = $callerId;
+                        $session->uptime = $uptime;
+                        $session->status = 'active';
+                        $session->bytes_in = $rawRx;
+                        $session->bytes_out = $rawTx;
+                        $session->total_bytes = $rawRx + $rawTx;
+                        $session->last_bytes_in = $rawRx;
+                        $session->last_bytes_out = $rawTx;
+                        $session->start_time = $realStartTime;
+                        $session->last_seen = $now;
+                        $session->save();
+
+                        if ($rawRx > 0 || $rawTx > 0) {
+                            data_usage_add_daily_delta($router->id, $username, 'PPPoE', $callerId, $rawRx, $rawTx, $today);
+                        }
                     }
 
-                    $session->bytes_in = $rawRx;
-                    $session->bytes_out = $rawTx;
-                    $session->total_bytes = $rawRx + $rawTx;
-                    $session->last_bytes_in = $rawRx;
-                    $session->last_bytes_out = $rawTx;
-                    $session->last_seen = $now;
-                    $session->uptime = $uptime ?: $session->uptime;
-                    $session->ip_address = $ip ?: $session->ip_address;
-                    $session->mac_address = $callerId ?: $session->mac_address;
-                    $session->save();
+                    $pppoeResult = [
+                        'status'     => 'success',
+                        'online'     => true,
+                        'service'    => 'PPPoE',
+                        'session_id' => $sId,
+                        'ip'         => $ip,
+                        'mac'        => $callerId,
+                        'uptime'     => $uptime,
+                        'upload'     => data_usage_format_bytes($rawRx),
+                        'download'   => data_usage_format_bytes($rawTx),
+                        'total'      => data_usage_format_bytes($rawRx + $rawTx),
+                        'start_time' => $session->start_time
+                    ];
                 } else {
-                    $realStartTime = data_usage_parse_routeros_datetime($linkUp, $uptime);
+                    // PPPoE is offline: close ONLY PPPoE active DB sessions
+                    $lastLoggedOut = '';
+                    $lastDiscReason = '';
+                    try {
+                        $secReq = new RouterOS\Request('/ppp/secret/print');
+                        $secReq->setQuery(RouterOS\Query::where('name', $username));
+                        $secRes = $client->sendSync($secReq);
+                        foreach ($secRes as $sec) {
+                            $lastLoggedOut = $sec->getProperty('last-logged-out') ?: '';
+                            $lastDiscReason = $sec->getProperty('last-disconnect-reason') ?: '';
+                            break;
+                        }
+                    } catch (Exception $eSec) {}
 
-                    $session = ORM::for_table('tbl_data_usage_sessions')->create();
-                    $session->session_id = $sId;
-                    $session->router_id = $router->id;
-                    $session->router_name = $router->name;
-                    $session->username = $username;
-                    $session->service = 'PPPoE';
-                    $session->ip_address = $ip;
-                    $session->mac_address = $callerId;
-                    $session->uptime = $uptime;
-                    $session->status = 'active';
-                    $session->bytes_in = $rawRx;
-                    $session->bytes_out = $rawTx;
-                    $session->total_bytes = $rawRx + $rawTx;
-                    $session->last_bytes_in = $rawRx;
-                    $session->last_bytes_out = $rawTx;
-                    $session->start_time = $realStartTime;
-                    $session->last_seen = $now;
-                    $session->save();
+                    $activePppDb = ORM::for_table('tbl_data_usage_sessions')
+                        ->where('router_id', $router->id)
+                        ->where('username', $username)
+                        ->where('service', 'PPPoE')
+                        ->where('status', 'active')
+                        ->find_many();
 
-                    if ($rawRx > 0 || $rawTx > 0) {
-                        data_usage_add_daily_delta($router->id, $username, 'PPPoE', $callerId, $rawRx, $rawTx, $today);
+                    foreach ($activePppDb as $act) {
+                        $act->status = 'closed';
+                        $act->closed_time = data_usage_parse_routeros_datetime($lastLoggedOut);
+                        $act->close_reason = $lastDiscReason ?: 'live_check_offline';
+                        $act->save();
                     }
+
+                    $pppoeResult = [
+                        'status'                 => 'success',
+                        'online'                 => false,
+                        'service'                => 'PPPoE',
+                        'last_logged_out'        => $lastLoggedOut,
+                        'last_disconnect_reason' => $lastDiscReason,
+                        'message'                => 'PPPoE is offline'
+                    ];
                 }
-
-                return [
-                    'status'     => 'success',
-                    'online'     => true,
-                    'service'    => 'PPPoE',
-                    'session_id' => $sId,
-                    'ip'         => $ip,
-                    'mac'        => $callerId,
-                    'uptime'     => $uptime,
-                    'upload'     => data_usage_format_bytes($rawRx),
-                    'download'   => data_usage_format_bytes($rawTx),
-                    'total'      => data_usage_format_bytes($rawRx + $rawTx),
-                    'start_time' => $session->start_time
-                ];
-            } else {
-                // User is offline: fetch real last-logged-out & disconnect-reason from /ppp/secret
-                $lastLoggedOut = '';
-                $lastDiscReason = '';
-                try {
-                    $secReq = new RouterOS\Request('/ppp/secret/print');
-                    $secReq->setQuery(RouterOS\Query::where('name', $username));
-                    $secRes = $client->sendSync($secReq);
-                    foreach ($secRes as $sec) {
-                        $lastLoggedOut = $sec->getProperty('last-logged-out') ?: '';
-                        $lastDiscReason = $sec->getProperty('last-disconnect-reason') ?: '';
-                        break;
-                    }
-                } catch (Exception $eSec) {}
-
-                $activeDb = ORM::for_table('tbl_data_usage_sessions')
-                    ->where('router_id', $router->id)
-                    ->where('username', $username)
-                    ->where('service', 'PPPoE')
-                    ->where('status', 'active')
-                    ->find_many();
-
-                foreach ($activeDb as $act) {
-                    $act->status = 'closed';
-                    $act->closed_time = data_usage_parse_routeros_datetime($lastLoggedOut);
-                    $act->close_reason = $lastDiscReason ?: 'live_check_offline';
-                    $act->save();
-                }
-
-                return [
-                    'status'                 => 'success',
-                    'online'                 => false,
-                    'service'                => 'PPPoE',
-                    'last_logged_out'        => $lastLoggedOut,
-                    'last_disconnect_reason' => $lastDiscReason,
-                    'message'                => 'User is offline (' . ($lastDiscReason ?: 'Disconnected') . ' at ' . ($lastLoggedOut ?: 'unknown') . ')'
-                ];
-            }
+            } catch (Exception $ePppCheck) {}
         }
+
+        // 2. Audit Hotspot Independently
+        if ($checkHotspot) {
+            try {
+                $req = new RouterOS\Request('/ip/hotspot/active/print');
+                $req->setQuery(RouterOS\Query::where('user', $username));
+                $hsRes = $client->sendSync($req);
+
+                $activeHs = null;
+                foreach ($hsRes as $hs) {
+                    if ($hs->getType() === RouterOS\Response::TYPE_DATA && !empty($hs->getProperty('user'))) {
+                        $activeHs = $hs;
+                        break;
+                    }
+                }
+
+                if ($activeHs) {
+                    $mac    = $activeHs->getProperty('mac-address') ?: '';
+                    $ip     = $activeHs->getProperty('address') ?: '';
+                    $uptime = $activeHs->getProperty('uptime') ?: '';
+                    $rawRx  = (float)$activeHs->getProperty('bytes-in');
+                    $rawTx  = (float)$activeHs->getProperty('bytes-out');
+
+                    $sessionQuery = ORM::for_table('tbl_data_usage_sessions')
+                        ->where('router_id', $router->id)
+                        ->where('username', $username)
+                        ->where('service', 'Hotspot')
+                        ->where('status', 'active');
+                    if (!empty($mac) && $mac !== '-') {
+                        $sessionQuery->where('mac_address', $mac);
+                    }
+                    $session = $sessionQuery->find_one();
+
+                    if ($session) {
+                        $deltaIn = max(0, $rawRx - $session->last_bytes_in);
+                        $deltaOut = max(0, $rawTx - $session->last_bytes_out);
+                        if ($deltaIn > 0 || $deltaOut > 0) {
+                            data_usage_add_daily_delta($router->id, $username, 'Hotspot', $mac ?: $session->mac_address, $deltaIn, $deltaOut, $today);
+                        }
+
+                        $session->bytes_in = $rawRx;
+                        $session->bytes_out = $rawTx;
+                        $session->total_bytes = $rawRx + $rawTx;
+                        $session->last_bytes_in = $rawRx;
+                        $session->last_bytes_out = $rawTx;
+                        $session->last_seen = $now;
+                        $session->uptime = $uptime ?: $session->uptime;
+                        $session->ip_address = $ip ?: $session->ip_address;
+                        $session->mac_address = $mac ?: $session->mac_address;
+                        $session->save();
+                    } else {
+                        $calcStartTime = date('Y-m-d H:i:s', time() - data_usage_uptime_to_seconds($uptime));
+                        $sessionId = data_usage_generate_hotspot_session_id($username, $mac, strtotime($calcStartTime));
+
+                        $session = ORM::for_table('tbl_data_usage_sessions')->create();
+                        $session->session_id = $sessionId;
+                        $session->router_id = $router->id;
+                        $session->router_name = $router->name;
+                        $session->username = $username;
+                        $session->service = 'Hotspot';
+                        $session->ip_address = $ip;
+                        $session->mac_address = $mac;
+                        $session->uptime = $uptime;
+                        $session->status = 'active';
+                        $session->bytes_in = $rawRx;
+                        $session->bytes_out = $rawTx;
+                        $session->total_bytes = $rawRx + $rawTx;
+                        $session->last_bytes_in = $rawRx;
+                        $session->last_bytes_out = $rawTx;
+                        $session->start_time = $calcStartTime;
+                        $session->last_seen = $now;
+                        $session->save();
+
+                        if ($rawRx > 0 || $rawTx > 0) {
+                            data_usage_add_daily_delta($router->id, $username, 'Hotspot', $mac, $rawRx, $rawTx, $today);
+                        }
+                    }
+
+                    $hotspotResult = [
+                        'status'     => 'success',
+                        'online'     => true,
+                        'service'    => 'Hotspot',
+                        'session_id' => $session->session_id,
+                        'ip'         => $ip,
+                        'mac'        => $mac,
+                        'uptime'     => $uptime,
+                        'upload'     => data_usage_format_bytes($rawRx),
+                        'download'   => data_usage_format_bytes($rawTx),
+                        'total'      => data_usage_format_bytes($rawRx + $rawTx),
+                        'start_time' => $session->start_time
+                    ];
+                } else {
+                    // Hotspot is offline: close ONLY Hotspot active DB sessions
+                    $activeHsDb = ORM::for_table('tbl_data_usage_sessions')
+                        ->where('router_id', $router->id)
+                        ->where('username', $username)
+                        ->where('service', 'Hotspot')
+                        ->where('status', 'active')
+                        ->find_many();
+
+                    foreach ($activeHsDb as $act) {
+                        $act->status = 'closed';
+                        $act->closed_time = $act->last_seen ?: $now;
+                        $act->close_reason = 'live_check_offline';
+                        $act->save();
+                    }
+
+                    $hotspotResult = [
+                        'status'  => 'success',
+                        'online'  => false,
+                        'service' => 'Hotspot',
+                        'message' => 'Hotspot is offline'
+                    ];
+                }
+            } catch (Exception $eHsCheck) {}
+        }
+
+        // Return the active connection if available, or the offline response
+        if ($service === 'Hotspot') {
+            return $hotspotResult ?: ['status' => 'error', 'message' => 'Failed to check Hotspot status'];
+        }
+        if ($service === 'PPPoE') {
+            return $pppoeResult ?: ['status' => 'error', 'message' => 'Failed to check PPPoE status'];
+        }
+
+        // $service === 'all': return whichever is online, or offline
+        if ($hotspotResult && $hotspotResult['online']) {
+            return $hotspotResult;
+        }
+        if ($pppoeResult && $pppoeResult['online']) {
+            return $pppoeResult;
+        }
+
+        return $pppoeResult ?: ($hotspotResult ?: ['status' => 'success', 'online' => false, 'message' => 'User is offline']);
     } catch (Exception $e) {
         return ['status' => 'error', 'message' => $e->getMessage()];
     }
@@ -1641,6 +1887,7 @@ function data_usage_query_live_user_status($router, $username, $service = 'PPPoE
 function data_usage_async_routers_status()
 {
     _admin();
+    session_write_close();
     header('Content-Type: application/json; charset=utf-8');
 
     $routerId = isset($_REQUEST['router_id']) ? (int)$_REQUEST['router_id'] : 0;
@@ -1692,6 +1939,7 @@ function data_usage_sync_router_users($routerId = 0)
                 $req = new RouterOS\Request('/ppp/secret/print');
                 $secrets = $client->sendSync($req);
                 foreach ($secrets as $s) {
+                    if ($s->getType() !== RouterOS\Response::TYPE_DATA) continue;
                     $uName = trim((string)$s->getProperty('name'));
                     if (empty($uName)) continue;
                     $svc = (string)$s->getProperty('service');
@@ -1727,13 +1975,18 @@ function data_usage_sync_router_users($routerId = 0)
             try {
                 $req = new RouterOS\Request('/ip/hotspot/user/print');
                 $hsUsers = $client->sendSync($req);
+                $currentHsUsersMap = [];
+
                 foreach ($hsUsers as $u) {
+                    if ($u->getType() !== RouterOS\Response::TYPE_DATA) continue;
                     $uName = trim((string)$u->getProperty('name'));
                     if (empty($uName) || $uName === 'default-trial') continue;
                     $mac = (string)$u->getProperty('mac-address');
                     $profile = (string)$u->getProperty('profile');
                     $comment = (string)$u->getProperty('comment');
                     $disabled = (string)$u->getProperty('disabled') === 'true' ? 1 : 0;
+
+                    $currentHsUsersMap[$uName] = true;
 
                     $ru = ORM::for_table('tbl_data_usage_router_users')
                         ->where('router_id', $router->id)
@@ -1751,9 +2004,46 @@ function data_usage_sync_router_users($routerId = 0)
                     $ru->profile = $profile;
                     $ru->comment = $comment;
                     $ru->disabled = $disabled;
+                    $ru->missing_since = null; // Active on router: unmark missing
                     $ru->last_synced = $now;
                     $ru->save();
                     $syncedCount++;
+                }
+
+                // 3. Hotspot 7-Day Missing Grace Period Check (PPPoE untouched)
+                $existingHsUsers = ORM::for_table('tbl_data_usage_router_users')
+                    ->where('router_id', $router->id)
+                    ->where('service', 'Hotspot')
+                    ->find_many();
+
+                foreach ($existingHsUsers as $exRu) {
+                    if (!isset($currentHsUsersMap[$exRu->username])) {
+                        // User is missing from /ip hotspot user
+                        if (empty($exRu->missing_since)) {
+                            // First noticed missing: mark timestamp, don't delete yet
+                            $exRu->missing_since = $now;
+                            $exRu->save();
+                        } else {
+                            // Already marked missing: check if 7 days (7 * 86400s) have passed
+                            $missingDuration = time() - strtotime($exRu->missing_since);
+                            if ($missingDuration >= (7 * 86400)) {
+                                // Grace period expired: delete session history, daily history, and registry entry
+                                ORM::for_table('tbl_data_usage_sessions')
+                                    ->where('router_id', $router->id)
+                                    ->where('username', $exRu->username)
+                                    ->where('service', 'Hotspot')
+                                    ->delete_many();
+
+                                ORM::for_table('tbl_data_usage_daily')
+                                    ->where('router_id', $router->id)
+                                    ->where('username', $exRu->username)
+                                    ->where('service', 'Hotspot')
+                                    ->delete_many();
+
+                                $exRu->delete();
+                            }
+                        }
+                    }
                 }
             } catch (Exception $eHs) {}
 
@@ -1810,12 +2100,14 @@ function data_usage_sync()
 
             $activePppSids = [];
             $activeHsKeys = [];
+            $activeHsUsernames = [];
 
             // 1. Process PPPoE active sessions
             try {
                 $pppActive = $client->sendSync(new RouterOS\Request('/ppp/active/print'));
                 $pppMap = [];
                 foreach ($pppActive as $p) {
+                    if ($p->getType() !== RouterOS\Response::TYPE_DATA) continue;
                     $uName = $p->getProperty('name');
                     if (!empty($uName)) {
                         $rawSid = $p->getProperty('session-id') ?: ($p->getProperty('.id') ?: $uName);
@@ -1832,6 +2124,7 @@ function data_usage_sync()
 
                 $interfaces = $client->sendSync(new RouterOS\Request('/interface/print'));
                 foreach ($interfaces as $iface) {
+                    if ($iface->getType() !== RouterOS\Response::TYPE_DATA) continue;
                     $ifType = $iface->getProperty('type');
                     $ifName = $iface->getProperty('name');
 
@@ -1910,6 +2203,7 @@ function data_usage_sync()
             try {
                 $hsActive = $client->sendSync(new RouterOS\Request('/ip/hotspot/active/print'));
                 foreach ($hsActive as $hs) {
+                    if ($hs->getType() !== RouterOS\Response::TYPE_DATA) continue;
                     $uName  = $hs->getProperty('user');
                     if (!empty($uName)) {
                         $mac    = $hs->getProperty('mac-address') ?: '';
@@ -1918,17 +2212,20 @@ function data_usage_sync()
                         $tx     = (float)$hs->getProperty('bytes-in');
                         $rx     = (float)$hs->getProperty('bytes-out');
 
-                        $activeHsKeys[] = $uName . '_' . $mac;
+                        $activeHsUsernames[] = $uName;
+                        if (!empty($mac) && $mac !== '-') {
+                            $activeHsKeys[] = $uName . '_' . $mac;
+                        }
 
-                        $session = ORM::for_table('tbl_data_usage_sessions')
+                        $sessionQuery = ORM::for_table('tbl_data_usage_sessions')
                             ->where('router_id', $router->id)
                             ->where('username', $uName)
                             ->where('service', 'Hotspot')
                             ->where('status', 'active');
-                        if (!empty($mac)) {
-                            $session->where('mac_address', $mac);
+                        if (!empty($mac) && $mac !== '-') {
+                            $sessionQuery->where('mac_address', $mac);
                         }
-                        $session = $session->find_one();
+                        $session = $sessionQuery->find_one();
 
                         if ($session) {
                             $deltaIn = max(0, $tx - $session->last_bytes_in);
@@ -2014,8 +2311,20 @@ function data_usage_sync()
                         $totalReconciled++;
                     }
                 } elseif ($act->service === 'Hotspot') {
-                    $key = $act->username . '_' . $act->mac_address;
-                    if (!in_array($key, $activeHsKeys)) {
+                    $isLive = false;
+                    if (!empty($act->mac_address) && $act->mac_address !== '-') {
+                        $key = $act->username . '_' . $act->mac_address;
+                        if (in_array($key, $activeHsKeys)) {
+                            $isLive = true;
+                        }
+                    } else {
+                        // Fallback for missing/blank/"-" MAC address
+                        if (in_array($act->username, $activeHsUsernames)) {
+                            $isLive = true;
+                        }
+                    }
+
+                    if (!$isLive) {
                         $act->status = 'closed';
                         $act->closed_time = $act->last_seen ?: $now;
                         $act->close_reason = 'session_timeout';

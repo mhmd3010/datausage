@@ -203,6 +203,7 @@ table th {
                                 <th>IP / MAC Address</th>
                                 <th>Status</th>
                                 <th>Uptime</th>
+                                <th>Last Seen</th>
                                 <th>Live Upload</th>
                                 <th>Live Download</th>
                                 <th>Total Usage</th>
@@ -212,7 +213,7 @@ table th {
                         <tbody>
                             {if count($sessions) == 0}
                             <tr>
-                                <td colspan="9" class="text-center text-muted" style="padding: 30px;">
+                                <td colspan="10" class="text-center text-muted" style="padding: 30px;">
                                     No users found on {$currentRouter->name}.
                                 </td>
                             </tr>
@@ -220,7 +221,7 @@ table th {
                             {foreach $sessions as $s}
                             <tr id="session_row_{$s['username']|regex_replace:'/[^a-zA-Z0-9_-]/':'_'}" data-service="{$s['service']}" data-status="{$s['status']}">
                                 <td>
-                                    <a href="{$_url}plugin/data_usage_user&username={$s['username']|urlencode}" style="font-weight: 600;">
+                                    <a href="{$_url}plugin/data_usage_user&username={$s['username']|urlencode}&router_id={$s['router_id']}" style="font-weight: 600;">
                                         {$s['username']}
                                     </a>
                                     {if !empty($s['fullname'])}
@@ -259,6 +260,13 @@ table th {
                                     {if $s['status'] == 'Online'}
                                     <span class="text-primary" style="font-weight: 600;">{$s['uptime_fmt']}</span>
                                     {else}
+                                    <span class="text-muted">-</span>
+                                    {/if}
+                                </td>
+                                <td class="col-last-seen">
+                                    {if $s['status'] == 'Online'}
+                                    <span class="label label-success">Now</span>
+                                    {else}
                                     <small class="text-muted">{$s['last_seen']}</small>
                                     {/if}
                                 </td>
@@ -274,7 +282,7 @@ table th {
                                         Disconnect
                                     </button>
                                     {/if}
-                                    <a href="{$_url}plugin/data_usage_user&username={$s['username']|urlencode}" class="btn btn-xs btn-info">
+                                    <a href="{$_url}plugin/data_usage_user&username={$s['username']|urlencode}&router_id={$s['router_id']}" class="btn btn-xs btn-info">
                                         History
                                     </a>
                                 </td>
@@ -360,6 +368,7 @@ function refreshRow(username, routerId, service, btn) {
                 $tr.find('.col-ip-mac').html(ipMacHtml);
                 $tr.find('.col-status').html('<span class="label label-success">Online</span>').attr('data-search', 'Online').attr('data-order', '1');
                 $tr.find('.col-uptime').html('<span class="text-primary" style="font-weight: 600;">' + (res.uptime || '-') + '</span>');
+                $tr.find('.col-last-seen').html('<span class="label label-success">Now</span>');
                 $tr.find('.col-upload').html('<span class="text-info">' + res.upload + '</span>');
                 $tr.find('.col-download').html('<span class="text-success">' + res.download + '</span>');
                 $tr.find('.col-total').html('<strong>' + res.total + '</strong>');
@@ -373,7 +382,8 @@ function refreshRow(username, routerId, service, btn) {
                 var ipMacHtml = (res.mac && res.mac !== '-') ? '<span class="text-muted" style="font-family: monospace; font-size: 11px;">' + res.mac + '</span>' : '<span class="text-muted">-</span>';
                 $tr.find('.col-ip-mac').html(ipMacHtml);
                 $tr.find('.col-status').html('<span class="label label-default">Offline</span>').attr('data-search', 'Offline').attr('data-order', '2');
-                $tr.find('.col-uptime').html('<small class="text-muted">' + (res.last_logged_out || 'Offline') + '</small>').attr('data-sort', '0');
+                $tr.find('.col-uptime').html('<span class="text-muted">-</span>').attr('data-sort', '0');
+                $tr.find('.col-last-seen').html('<small class="text-muted">' + (res.last_logged_out || 'Offline') + '</small>');
                 $tr.css({ 'background-color': '#fee2e2', 'transition': 'background-color 0.3s ease' });
                 setTimeout(function() {
                     $tr.css({ 'background-color': '', 'transition': 'background-color 1s ease' });
@@ -455,21 +465,24 @@ document.addEventListener('DOMContentLoaded', initDeveloperPopups);
 <script>
 $(document).ready(function() {
     if ($('#routerCardsContainer').length) {
-        // Asynchronously check live status & counts from RouterOS API in background
-        $.ajax({
-            url: '{$_url}plugin/data_usage_async_routers_status',
-            type: 'GET',
-            dataType: 'json',
-            success: function(res) {
-                $('.rc-spin').remove();
-                if (res.status === 'success' && res.routers) {
-                    $.each(res.routers, function(rId, data) {
-                        var $card = $('#router_card_' + rId);
-                        var $name = $('#rc_name_' + rId);
-                        var $count = $('#rc_count_' + rId);
-                        var $label = $('#rc_label_' + rId);
-                        var $sync = $('#rc_sync_' + rId);
+        // Query each router card in parallel independently so fast local routers update immediately
+        $('.router-card[data-router-id]').each(function() {
+            var rId = $(this).data('router-id');
+            var $card = $('#router_card_' + rId);
+            var $name = $('#rc_name_' + rId);
+            var $count = $('#rc_count_' + rId);
+            var $label = $('#rc_label_' + rId);
+            var $sync = $('#rc_sync_' + rId);
+            var $spin = $('#rc_spin_' + rId);
 
+            $.ajax({
+                url: '{$_url}plugin/data_usage_async_routers_status&router_id=' + rId,
+                type: 'GET',
+                dataType: 'json',
+                success: function(res) {
+                    $spin.remove();
+                    if (res.status === 'success' && res.routers && res.routers[rId]) {
+                        var data = res.routers[rId];
                         if (data.online) {
                             $card.removeClass('router-card-offline');
                             $name.css('color', '#1e293b');
@@ -483,12 +496,12 @@ $(document).ready(function() {
                             $label.removeClass('stat-label').addClass('stat-label-offline').text('Unreachable');
                             $sync.css('color', '#f87171').text('Last Sync: ' + data.last_sync);
                         }
-                    });
+                    }
+                },
+                error: function() {
+                    $spin.remove();
                 }
-            },
-            error: function() {
-                $('.rc-spin').remove();
-            }
+            });
         });
     }
 

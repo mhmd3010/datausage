@@ -5,17 +5,20 @@ table th {
     text-transform: none !important;
     font-weight: 600 !important;
 }
+.profile-table td, .profile-table th {
+    vertical-align: middle !important;
+}
 </style>
 
 <!-- Top Navigation & Action Toolbar -->
-<div class="row" style="margin-bottom: 20px;">
+<div class="row" style="margin-bottom: 16px;">
     <div class="col-sm-12" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <div style="display: flex; align-items: center; gap: 12px;">
-            <a href="javascript:history.back()" class="btn btn-sm btn-default" style="font-weight: 600; border-radius: 8px;">
+            <a href="javascript:history.back()" class="btn btn-sm btn-default" style="font-weight: 600; border-radius: 6px;">
                 <i class="fa fa-arrow-left"></i> Back
             </a>
             <h3 style="margin: 0; font-size: 20px; font-weight: 700; color: #1e293b;">
-                <i class="fa fa-cogs text-warning"></i> Settings
+                <i class="fa fa-cogs text-warning"></i> Settings &amp; MikroTik Setup
             </h3>
         </div>
         <div class="btn-group">
@@ -29,34 +32,37 @@ table th {
     </div>
 </div>
 
-<!-- Main Panel -->
+<!-- Main Setup Container -->
 <div class="row">
     <div class="col-sm-12">
         <div class="panel panel-hovered mb20 panel-primary">
-            <div class="panel-heading">
-                Settings & MikroTik Configuration
+            <div class="panel-heading" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <span style="font-weight: 700;">MikroTik Router Configuration</span>
+                <span class="label {if $routerOnline}label-success{else}label-danger{/if}" style="font-size: 11px;">
+                    {if $routerOnline}<i class="fa fa-check-circle"></i> Connected to Router{else}<i class="fa fa-times-circle"></i> Router Unreachable{/if}
+                </span>
             </div>
-            <div class="panel-body">
+            <div class="panel-body" style="padding: 18px;">
                 
                 <!-- Router Selector & Webhook URL -->
-                <div class="row" style="margin-bottom: 20px;">
+                <div class="row" style="margin-bottom: 18px;">
                     <div class="col-md-4">
-                        <div class="form-group">
-                            <label>Target Router:</label>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label style="font-weight: 600;">Target Router:</label>
                             <select id="routerSelect" class="form-control" onchange="window.location.href='{$_url}plugin/data_usage_scripts&router_id=' + this.value;">
                                 {foreach $routers as $r}
                                 <option value="{$r->id}" {if $selectedRouterId == $r->id}selected{/if}>
-                                    {$r->name} ({$r->ip_address}) [ID: {$r->id}]
+                                    {$r->name} ({$r->ip_address})
                                 </option>
                                 {/foreach}
                             </select>
                         </div>
                     </div>
                     <div class="col-md-8">
-                        <div class="form-group">
-                            <label>Webhook URL:</label>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label style="font-weight: 600;">Webhook URL:</label>
                             <div class="input-group">
-                                <input type="text" id="txtWebhookUrl" class="form-control" value="{$webhookUrl}" readonly style="font-family:monospace;">
+                                <input type="text" id="txtWebhookUrl" class="form-control" value="{$webhookUrl}" readonly style="font-family: monospace; font-size: 12px;">
                                 <span class="input-group-btn">
                                     <button class="btn btn-default" type="button" onclick="copyText('txtWebhookUrl')">
                                         <i class="fa fa-copy"></i> Copy
@@ -67,98 +73,167 @@ table th {
                     </div>
                 </div>
 
-                <!-- 1. Automatic MikroTik Poller Installation -->
-                <div class="panel panel-default">
-                    <div class="panel-heading" style="display:flex; justify-content:space-between; align-items:center; flex-wrap: wrap; gap: 8px;">
+                <!-- 1. Background Poller Installation -->
+                <div class="panel panel-default" style="border-radius: 8px; margin-bottom: 20px;">
+                    <div class="panel-heading" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
                         <div>
-                            <strong>1. MikroTik Poller (Auto-Install)</strong>
+                            <strong>1. Poller Script (Live Traffic Counters)</strong>
                         </div>
                         <div class="btn-group">
-                            <form method="POST" action="{$_url}plugin/data_usage_install_poller" style="display:inline-block; margin-right: 5px;">
+                            <form method="POST" action="{$_url}plugin/data_usage_install_poller" style="display: inline-block; margin-right: 4px;">
+                                <input type="hidden" name="csrf_token" value="{$csrf_token}">
                                 <input type="hidden" name="router_id" value="{$selectedRouterId}">
-                                <button type="submit" class="btn btn-xs btn-success">
-                                    <i class="fa fa-magic"></i> Auto-Install / Update on Target Router
+                                <button type="submit" class="btn btn-xs btn-success" style="font-weight: 600;">
+                                    <i class="fa fa-magic"></i> Auto-Install on Target Router
                                 </button>
                             </form>
-                            <a href="{$_url}plugin/data_usage_install_poller&router_id=0" class="btn btn-xs btn-primary" onclick="return confirm('Install / update poller script on all enabled routers?')">
+                            <a href="{$_url}plugin/data_usage_install_poller&router_id=0" class="btn btn-xs btn-primary" onclick="return confirm('Install / update poller script on all enabled routers?')" style="font-weight: 600;">
                                 <i class="fa fa-sitemap"></i> Install on All Routers
                             </a>
                         </div>
                     </div>
                     <div class="panel-body" style="padding: 10px 15px;">
                         <small class="text-muted">
-                            <i class="fa fa-check-circle text-success"></i> Auto-installs <strong>dataUsagePoller</strong> and a 2-minute scheduler on MikroTik via API.
+                            <i class="fa fa-check-circle text-success"></i> Automatically creates <code>dataUsagePoller</code> script and scheduler on MikroTik to stream real-time bandwidth.
                         </small>
                     </div>
                 </div>
 
-                <!-- 2. PPP & Hotspot Profile Scripts -->
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="panel panel-default">
-                            <div class="panel-heading">
-                                <strong>2. PPPoE Profile Scripts</strong>
-                            </div>
-                            <div class="panel-body">
-                                <div class="form-group">
-                                    <label>On Up Script:</label>
-                                    <textarea id="scriptPppUp" class="form-control" rows="7" readonly style="font-family: monospace; font-size: 11px; background: #272822; color: #f8f8f2;">
-:local routerId "{$selectedRouterId}";
-:local serverUrl "{$webhookUrl}";
-:local sid [/ppp active get [find name=$user] session-id];
-:local iface [/interface find where name=$interface];
-:local linkUp [/interface get $iface last-link-up-time];
-{literal}:if ($sid = "") do={ :set sid $user; }{/literal}
-:log info ("dataUsage [PPPoE on-up]: User " . $user . " connected (IP: " . $address . ", MAC: " . $caller-id . ", SID: " . $sid . ")");
-/tool fetch url=$serverUrl http-method=post http-data="action=session-start&router=$routerId&service=PPPoE&username=$user&session_id=$sid&mac=$caller-id&ip=$address&start_time=$linkUp" keep-result=no;</textarea>
-                                </div>
-                                <div class="form-group">
-                                    <label>On Down Script:</label>
-                                    <textarea id="scriptPppDown" class="form-control" rows="6" readonly style="font-family: monospace; font-size: 11px; background: #272822; color: #f8f8f2;">
-:local routerId "{$selectedRouterId}";
-:local serverUrl "{$webhookUrl}";
-:local secret [/ppp secret find where name=$user];
-:local loggedOut [/ppp secret get $secret last-logged-out];
-:local discReason [/ppp secret get $secret last-disconnect-reason];
-:log info ("dataUsage [PPPoE on-down]: User " . $user . " disconnected (" . $discReason . ")");
-/tool fetch url=$serverUrl http-method=post http-data="action=session-end&router=$routerId&service=PPPoE&username=$user&closed_time=$loggedOut&close_reason=$discReason" keep-result=no;</textarea>
-                                </div>
-                            </div>
-                        </div>
+                <!-- 2. Selective Profile Automation (PPPoE & Hotspot) -->
+                <div class="panel panel-default" style="border-radius: 8px; margin-bottom: 20px;">
+                    <div class="panel-heading">
+                        <strong>2. Profile Webhook Scripts (On-Up / On-Down / On-Login / On-Logout)</strong>
                     </div>
-
-                    <div class="col-md-6">
-                        <div class="panel panel-default">
-                            <div class="panel-heading">
-                                <strong>3. Hotspot Profile Scripts</strong>
-                            </div>
-                            <div class="panel-body">
-                                <div class="form-group">
-                                    <label>On Login Script:</label>
-                                    <textarea id="scriptHsLogin" class="form-control" rows="6" readonly style="font-family: monospace; font-size: 11px; background: #272822; color: #f8f8f2;">
-:local routerId "{$selectedRouterId}";
-:local serverUrl "{$webhookUrl}";
-:log info ("dataUsage [Hotspot on-login]: User " . $user . " logged in (IP: " . $address . ", MAC: " . $"mac-address" . ")");
-/tool fetch url=$serverUrl http-method=post http-data="action=session-start&router=$routerId&service=Hotspot&username=$user&mac=$"mac-address"&ip=$address" keep-result=no;</textarea>
-                                </div>
-                                <div class="form-group">
-                                    <label>On Logout Script:</label>
-                                    <textarea id="scriptHsLogout" class="form-control" rows="6" readonly style="font-family: monospace; font-size: 11px; background: #272822; color: #f8f8f2;">
-:local routerId "{$selectedRouterId}";
-:local serverUrl "{$webhookUrl}";
-:log info ("dataUsage [Hotspot on-logout]: User " . $user . " logged out (Cause: " . $cause . ")");
-/tool fetch url=$serverUrl http-method=post http-data="action=session-end&router=$routerId&service=Hotspot&username=$user&mac=$"mac-address"&ip=$address&uptime_secs=$"uptime-secs"&bytes_in=$"bytes-in"&bytes_out=$"bytes-out"&close_reason=$cause" keep-result=no;</textarea>
-                                </div>
-                            </div>
+                    <div class="panel-body" style="padding: 15px;">
+                        {if !$routerOnline}
+                        <div class="alert alert-warning" style="margin-bottom: 0; border-radius: 6px;">
+                            <i class="fa fa-exclamation-triangle"></i> Cannot query profiles because target router is currently offline. Please ensure the router is connected to auto-manage profiles.
                         </div>
+                        {else}
+                        <p class="text-muted" style="font-size: 13px; margin-bottom: 15px;">
+                            Select the specific profiles you wish to track. The system will automatically inject or remove the webhook tracking scripts.
+                        </p>
+
+                        <form method="POST" action="{$_url}plugin/data_usage_manage_profile_scripts" id="profileScriptsForm">
+                            <input type="hidden" name="csrf_token" value="{$csrf_token}">
+                            <input type="hidden" name="router_id" value="{$selectedRouterId}">
+                            <input type="hidden" name="action" id="profileActionInput" value="install">
+
+                            <div class="row">
+                                <!-- PPPoE Profiles Table -->
+                                <div class="col-md-6">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                        <h5 style="margin: 0; font-weight: 700; color: #1e293b;">
+                                            <i class="fa fa-plug text-primary"></i> PPPoE Profiles ({count($pppProfiles)})
+                                        </h5>
+                                        <div class="btn-group btn-group-xs">
+                                            <button type="button" class="btn btn-default btn-xs" onclick="toggleCheckboxes('chk_ppp_', true)">Select All</button>
+                                            <button type="button" class="btn btn-default btn-xs" onclick="toggleCheckboxes('chk_ppp_', false)">None</button>
+                                        </div>
+                                    </div>
+                                    <div class="table-responsive" style="max-height: 250px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                        <table class="table table-striped table-hover profile-table" style="margin-bottom: 0;">
+                                            <thead>
+                                                <tr style="background: #f8fafc;">
+                                                    <th style="width: 40px; text-align: center;">#</th>
+                                                    <th>Profile Name</th>
+                                                    <th style="width: 110px; text-align: center;">Script Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {if count($pppProfiles) == 0}
+                                                <tr><td colspan="3" class="text-center text-muted" style="padding: 15px;">No PPPoE profiles found</td></tr>
+                                                {else}
+                                                {foreach $pppProfiles as $idx => $p}
+                                                <tr>
+                                                    <td style="text-align: center;">
+                                                        <input type="checkbox" name="ppp_profiles[]" value="{$p['name']}" class="chk_ppp_" id="ppp_p_{$idx}">
+                                                    </td>
+                                                    <td>
+                                                        <label for="ppp_p_{$idx}" style="cursor: pointer; margin-bottom: 0; font-weight: 600;">{$p['name']}</label>
+                                                    </td>
+                                                    <td style="text-align: center;">
+                                                        {if $p['installed']}
+                                                        <span class="label label-success"><i class="fa fa-check"></i> Installed</span>
+                                                        {else}
+                                                        <span class="label label-default">Not Installed</span>
+                                                        {/if}
+                                                    </td>
+                                                </tr>
+                                                {/foreach}
+                                                {/if}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <!-- Hotspot User Profiles Table -->
+                                <div class="col-md-6">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                        <h5 style="margin: 0; font-weight: 700; color: #1e293b;">
+                                            <i class="fa fa-wifi text-warning"></i> Hotspot Profiles ({count($hsProfiles)})
+                                        </h5>
+                                        <div class="btn-group btn-group-xs">
+                                            <button type="button" class="btn btn-default btn-xs" onclick="toggleCheckboxes('chk_hs_', true)">Select All</button>
+                                            <button type="button" class="btn btn-default btn-xs" onclick="toggleCheckboxes('chk_hs_', false)">None</button>
+                                        </div>
+                                    </div>
+                                    <div class="table-responsive" style="max-height: 250px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                        <table class="table table-striped table-hover profile-table" style="margin-bottom: 0;">
+                                            <thead>
+                                                <tr style="background: #f8fafc;">
+                                                    <th style="width: 40px; text-align: center;">#</th>
+                                                    <th>Profile Name</th>
+                                                    <th style="width: 110px; text-align: center;">Script Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {if count($hsProfiles) == 0}
+                                                <tr><td colspan="3" class="text-center text-muted" style="padding: 15px;">No Hotspot profiles found</td></tr>
+                                                {else}
+                                                {foreach $hsProfiles as $idx => $h}
+                                                <tr>
+                                                    <td style="text-align: center;">
+                                                        <input type="checkbox" name="hs_profiles[]" value="{$h['name']}" class="chk_hs_" id="hs_p_{$idx}">
+                                                    </td>
+                                                    <td>
+                                                        <label for="hs_p_{$idx}" style="cursor: pointer; margin-bottom: 0; font-weight: 600;">{$h['name']}</label>
+                                                    </td>
+                                                    <td style="text-align: center;">
+                                                        {if $h['installed']}
+                                                        <span class="label label-success"><i class="fa fa-check"></i> Installed</span>
+                                                        {else}
+                                                        <span class="label label-default">Not Installed</span>
+                                                        {/if}
+                                                    </td>
+                                                </tr>
+                                                {/foreach}
+                                                {/if}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Action Buttons -->
+                            <div style="margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap;">
+                                <button type="button" class="btn btn-sm btn-success" style="font-weight: 600;" onclick="submitProfiles('install')">
+                                    <i class="fa fa-plus-circle"></i> Install on Selected Profiles
+                                </button>
+                                <button type="button" class="btn btn-sm btn-danger" style="font-weight: 600;" onclick="submitProfiles('remove')">
+                                    <i class="fa fa-trash"></i> Remove from Selected Profiles
+                                </button>
+                            </div>
+                        </form>
+                        {/if}
                     </div>
                 </div>
 
-                <!-- 4. Linux Server Crontab Setup -->
-                <div class="panel panel-default">
-                    <div class="panel-heading" style="display:flex; justify-content:space-between; align-items:center;">
+                <!-- 3. Linux Server Crontab Setup -->
+                <div class="panel panel-default" style="border-radius: 8px; margin-bottom: 20px;">
+                    <div class="panel-heading" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
                         <div>
-                            <strong>4. Server Crontab (Auto-Sync)</strong>
+                            <strong>3. Server Crontab (Auto-Sync &amp; Daily Totals)</strong>
                             <span style="font-size: 11px; margin-left: 10px;">
                                 {if $cronInfo['status'] == 'active'}
                                     <span class="text-success" style="font-weight: 600;"><i class="fa fa-check-circle"></i> Last run: {$cronInfo['last_run']} ({$cronInfo['ago']})</span>
@@ -185,17 +260,97 @@ table th {
                     </div>
                 </div>
 
+                <!-- 4. Manual Script Code Preview (Collapsible Accordion) -->
+                <div class="panel panel-default" style="border-radius: 8px; margin-bottom: 0;">
+                    <div class="panel-heading" style="cursor: pointer;" data-toggle="collapse" data-target="#manualScriptsCollapse">
+                        <strong style="color: #64748b;"><i class="fa fa-code"></i> View Manual Script Code (Optional) &darr;</strong>
+                    </div>
+                    <div id="manualScriptsCollapse" class="panel-collapse collapse">
+                        <div class="panel-body" style="padding: 15px;">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label>PPPoE On-Up Script:</label>
+                                        <textarea class="form-control" rows="5" readonly style="font-family: monospace; font-size: 11px; background: #272822; color: #f8f8f2;">:local routerId "{$selectedRouterId}";
+:local serverUrl "{$webhookUrl}";
+:local sid [/ppp active get [find name=$user] session-id];
+:local iface [/interface find where name=$interface];
+:local linkUp [/interface get $iface last-link-up-time];
+{literal}:if ($sid = "") do={ :set sid $user; }{/literal}
+/tool fetch url=$serverUrl http-method=post http-data="action=session-start&router=$routerId&service=PPPoE&username=$user&session_id=$sid&mac=$caller-id&ip=$address&start_time=$linkUp" keep-result=no;</textarea>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>PPPoE On-Down Script:</label>
+                                        <textarea class="form-control" rows="5" readonly style="font-family: monospace; font-size: 11px; background: #272822; color: #f8f8f2;">:local routerId "{$selectedRouterId}";
+:local serverUrl "{$webhookUrl}";
+:local secret [/ppp secret find where name=$user];
+:local loggedOut [/ppp secret get $secret last-logged-out];
+:local discReason [/ppp secret get $secret last-disconnect-reason];
+/tool fetch url=$serverUrl http-method=post http-data="action=session-end&router=$routerId&service=PPPoE&username=$user&closed_time=$loggedOut&close_reason=$discReason" keep-result=no;</textarea>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label>Hotspot On-Login Script:</label>
+                                        <textarea class="form-control" rows="5" readonly style="font-family: monospace; font-size: 11px; background: #272822; color: #f8f8f2;">:local routerId "{$selectedRouterId}";
+:local serverUrl "{$webhookUrl}";
+/tool fetch url=$serverUrl http-method=post http-data="action=session-start&router=$routerId&service=Hotspot&username=$user&mac=$"mac-address"&ip=$address" keep-result=no;</textarea>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Hotspot On-Logout Script:</label>
+                                        <textarea class="form-control" rows="5" readonly style="font-family: monospace; font-size: 11px; background: #272822; color: #f8f8f2;">:local routerId "{$selectedRouterId}";
+:local serverUrl "{$webhookUrl}";
+/tool fetch url=$serverUrl http-method=post http-data="action=session-end&router=$routerId&service=Hotspot&username=$user&mac=$"mac-address"&ip=$address&uptime_secs=$"uptime-secs"&bytes_in=$"bytes-in"&bytes_out=$"bytes-out"&close_reason=$cause" keep-result=no;</textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>
 </div>
 
 <script>
-function updateRouterId(val) {
-    var textareas = document.querySelectorAll('textarea');
-    textareas.forEach(function(el) {
-        el.value = el.value.replace(/:local routerId "[^"]*";/g, ':local routerId "' + val + '";');
-        el.value = el.value.replace(/:local routerId \\"[^"]*\\";/g, ':local routerId \\"' + val + '\\";');
+function toggleCheckboxes(className, state) {
+    var boxes = document.querySelectorAll('.' + className);
+    boxes.forEach(function(b) {
+        b.checked = state;
+    });
+}
+
+function submitProfiles(action) {
+    var checked = document.querySelectorAll('.chk_ppp_:checked, .chk_hs_:checked');
+    if (checked.length === 0) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'No Profiles Selected',
+            text: 'Please select at least one PPPoE or Hotspot profile using the checkboxes.'
+        });
+        return;
+    }
+
+    var titleText = (action === 'install') 
+        ? 'Install scripts on ' + checked.length + ' profile(s)?' 
+        : 'Remove scripts from ' + checked.length + ' profile(s)?';
+
+    Swal.fire({
+        title: titleText,
+        text: (action === 'install') 
+            ? 'This will inject the on-up/on-down and on-login/on-logout tracking scripts via API.' 
+            : 'This will clear the tracking scripts from the selected profiles.',
+        icon: (action === 'install') ? 'question' : 'warning',
+        showCancelButton: true,
+        confirmButtonColor: (action === 'install') ? '#10b981' : '#dc2626',
+        cancelButtonColor: '#64748b',
+        confirmButtonText: (action === 'install') ? 'Yes, Install' : 'Yes, Remove'
+    }).then(function(result) {
+        if (result.isConfirmed) {
+            document.getElementById('profileActionInput').value = action;
+            document.getElementById('profileScriptsForm').submit();
+        }
     });
 }
 
@@ -214,35 +369,6 @@ function copyText(elementId) {
         });
     }
 }
-
-// ── Developer Popups & Easter Egg ──
-function initDeveloperPopups() {
-    var triggerEgg = function() {
-        Swal.fire({
-            title: 'Data Usage & Tracker',
-            html: '<div style="text-align:center; padding:10px;">' +
-                  '<i class="fa fa-code fa-2x" style="color:#3c8dbc; margin-bottom:10px;"></i>' +
-                  '<p style="font-size:14px; margin-bottom:4px;">Developed by <b>Mahmud</b></p>' +
-                  '<p style="font-size:12px; color:#64748b; margin-bottom:16px;">Commercial Edition for SysTik</p>' +
-                  '<a href="https://wa.me/+8801540221898?text=I%20want%20to%20help%20you%20buy%20a%20meal" target="_blank" class="btn btn-success btn-sm" style="border-radius:20px; padding:6px 16px;">' +
-                  '<i class="fa fa-whatsapp"></i> Donate / Buy a Meal ☕' +
-                  '</a>' +
-                  '</div>',
-            showConfirmButton: true,
-            confirmButtonText: 'Close'
-        });
-    };
-
-    var titles = document.querySelectorAll('h3, .panel-heading');
-    titles.forEach(function(el) {
-        if (el.innerText.toLowerCase().indexOf('settings') !== -1 || el.innerText.toLowerCase().indexOf('script') !== -1) {
-            el.style.cursor = 'pointer';
-            el.title = "Developer Info";
-            el.addEventListener('click', triggerEgg);
-        }
-    });
-}
-document.addEventListener('DOMContentLoaded', initDeveloperPopups);
 </script>
 
 {include file="sections/footer.tpl"}
