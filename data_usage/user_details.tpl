@@ -132,6 +132,9 @@ table th {
                     <button type="button" class="btn btn-xs btn-default" onclick="checkLiveStatus('{$username}', '{$userRouterId}', 'all', this)" style="font-weight: 600;">
                         <i class="fa fa-refresh"></i> Refresh Live Status
                     </button>
+                    <button type="button" class="btn btn-xs btn-info" onclick="openTrafficModal('{$username}', '{$userRouterId}', '{$userService}')" style="font-weight: 600; background-color: #0284c7; border-color: #0284c7;">
+                        Monitor Traffic
+                    </button>
                     {/if}
                     {if !empty($activeSessionId)}
                     <button type="button" class="btn btn-xs btn-danger" onclick="disconnectUser('{$activeSessionId}', '{$activeRouterId}', '{$username}')" style="font-weight: 600;">
@@ -224,6 +227,70 @@ table th {
     <input type="hidden" name="redirect_to" value="user">
 </form>
 
+<!-- Traffic Monitor Modal -->
+<div class="modal fade" id="trafficModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-lg" role="document" style="max-width: 680px; margin: 30px auto;">
+        <div class="modal-content" style="border-radius: 8px; overflow: hidden; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15); border: 1px solid #e2e8f0;">
+            <div class="modal-header" style="background: #ffffff; border-bottom: 1px solid #e2e8f0; padding: 12px 18px;">
+                <span id="tm_status_badge" class="label label-success pull-right" style="font-size: 11px; padding: 4px 8px; border-radius: 3px; margin-top: 2px;">
+                    Live
+                </span>
+                <h4 class="modal-title" style="margin: 0; font-size: 15px; font-weight: 700; color: #1e293b; text-align: left;">
+                    Live Traffic &mdash; <span id="tm_username">{$username}</span>
+                </h4>
+            </div>
+            <div class="modal-body" style="padding: 16px; background: #fafafa;">
+                <!-- Chart.js Graph Canvas -->
+                <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+                    <div style="position: relative; height: 190px; width: 100%;">
+                        <canvas id="tm_chart_canvas"></canvas>
+                    </div>
+                </div>
+
+                <!-- Bottom Stats Cards (Matching User Reference) -->
+                <div class="row" style="margin-top: 14px; margin-bottom: 0;">
+                    <div class="col-sm-6 col-xs-12" style="margin-bottom: 10px;">
+                        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #1d72b8; border-radius: 4px; padding: 12px 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
+                            <div style="font-size: 11px; font-weight: 700; color: #1d72b8; letter-spacing: 0.5px; text-transform: uppercase;">
+                                DOWNLOAD (TX)
+                            </div>
+                            <div style="margin-top: 4px; display: flex; align-items: baseline; gap: 6px;">
+                                <span id="tm_download_rate" style="font-size: 20px; font-weight: 700; color: #1d72b8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">0 bps</span>
+                                <span id="tm_download_state" class="text-muted" style="font-size: 12px;">(Live)</span>
+                            </div>
+                            <div id="tm_download_stats" class="text-muted" style="font-size: 11px; margin-top: 4px; line-height: 1.3;">
+                                Min: 0 bps | Avg: 0 bps | Max: 0 bps
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-sm-6 col-xs-12" style="margin-bottom: 10px;">
+                        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #7e22ce; border-radius: 4px; padding: 12px 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
+                            <div style="font-size: 11px; font-weight: 700; color: #7e22ce; letter-spacing: 0.5px; text-transform: uppercase;">
+                                UPLOAD (RX)
+                            </div>
+                            <div style="margin-top: 4px; display: flex; align-items: baseline; gap: 6px;">
+                                <span id="tm_upload_rate" style="font-size: 20px; font-weight: 700; color: #7e22ce; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">0 bps</span>
+                                <span id="tm_upload_state" class="text-muted" style="font-size: 12px;">(Live)</span>
+                            </div>
+                            <div id="tm_upload_stats" class="text-muted" style="font-size: 11px; margin-top: 4px; line-height: 1.3;">
+                                Min: 0 bps | Avg: 0 bps | Max: 0 bps
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 10px 18px; background: #ffffff; border-top: 1px solid #e2e8f0;">
+                <button type="button" id="tm_resume_btn" class="btn btn-sm btn-primary" onclick="restartTrafficPolling()" style="font-weight: 600;">
+                    Restart Stream
+                </button>
+                <button type="button" class="btn btn-sm btn-default" data-dismiss="modal" style="font-weight: 600;">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {include file="sections/footer.tpl"}
 
 <script>
@@ -231,6 +298,10 @@ $(document).ready(function() {
     $('#datatable').DataTable({
         "pagingType": "full_numbers",
         "order": [[ 5, "desc" ]]
+    });
+
+    $('#trafficModal').on('hidden.bs.modal', function () {
+        closeTrafficModal();
     });
 });
 
@@ -306,6 +377,302 @@ function checkLiveStatus(username, routerId, service, btn) {
             Swal.fire({ icon: 'error', title: 'Connection Error', text: 'Connection error while querying router API.' });
         }
     });
+}
+
+// ── Live Traffic Monitoring Engine (Chart.js + Configurable Chained Polling) ──
+var tmPollMs = parseInt('{$trafficPollMs|default:100}') || 100;
+
+var tmState = {
+    isOpen: false,
+    isFetching: false,
+    username: '',
+    routerId: 0,
+    service: 'PPPoE',
+    endTime: 0,
+    pollTimeout: null,
+    chart: null,
+    downloadHistory: [],
+    uploadHistory: [],
+    timeLabels: [],
+    maxPoints: 200
+};
+
+function openTrafficModal(username, routerId, service) {
+    tmState.username = username;
+    tmState.routerId = routerId;
+    tmState.service = service || 'PPPoE';
+    tmState.isOpen = true;
+    tmState.isFetching = false;
+    tmState.downloadHistory = [];
+    tmState.uploadHistory = [];
+    tmState.timeLabels = [];
+
+    $('#tm_username').text(username);
+    $('#tm_download_rate').text('0 bps');
+    $('#tm_upload_rate').text('0 bps');
+    $('#tm_download_state').text('(Live)');
+    $('#tm_upload_state').text('(Live)');
+    $('#tm_download_stats').text('Min: 0 bps | Avg: 0 bps | Max: 0 bps');
+    $('#tm_upload_stats').text('Min: 0 bps | Avg: 0 bps | Max: 0 bps');
+    $('#tm_status_badge').removeClass('label-default').addClass('label-success').text('Live');
+
+    $('#trafficModal').modal('show');
+
+    setTimeout(function() {
+        initChartJs();
+        restartTrafficPolling();
+    }, 250);
+}
+
+function closeTrafficModal() {
+    tmState.isOpen = false;
+    clearTimeout(tmState.pollTimeout);
+    setTrafficStatusUI(false);
+}
+
+function restartTrafficPolling() {
+    clearTimeout(tmState.pollTimeout);
+    tmState.isOpen = true;
+    tmState.isFetching = false;
+    tmState.endTime = Date.now() + 15000; // 15-second background limit
+    setTrafficStatusUI(true);
+
+    // Start chained polling
+    pollTrafficChained();
+}
+
+function setTrafficStatusUI(isActive) {
+    if (isActive) {
+        $('#tm_status_badge').removeClass('label-default').addClass('label-success').text('Live');
+        $('#tm_download_state').text('(Live)');
+        $('#tm_upload_state').text('(Live)');
+        $('#tm_resume_btn').removeClass('btn-success').addClass('btn-primary').text('Restart Monitor');
+    } else {
+        $('#tm_status_badge').removeClass('label-success').addClass('label-default').text('Stopped');
+        $('#tm_download_state').text('(Stopped)');
+        $('#tm_upload_state').text('(Stopped)');
+        $('#tm_resume_btn').removeClass('btn-primary').addClass('btn-success').text('Restart Monitor');
+    }
+}
+
+function pollTrafficChained() {
+    if (!tmState.isOpen) return;
+    if (Date.now() >= tmState.endTime) {
+        setTrafficStatusUI(false);
+        return;
+    }
+    if (tmState.isFetching) return;
+
+    tmState.isFetching = true;
+    var reqStart = Date.now();
+
+    $.ajax({
+        url: '{$_url}plugin/data_usage_live_traffic',
+        type: 'GET',
+        data: {
+            router_id: tmState.routerId,
+            username: tmState.username,
+            service: tmState.service
+        },
+        dataType: 'json',
+        success: function(res) {
+            if (res.status === 'success' && tmState.isOpen) {
+                if (res.poll_ms) {
+                    tmPollMs = parseInt(res.poll_ms) || tmPollMs;
+                }
+                var downBps = parseFloat(res.download_bps) || 0;
+                var upBps = parseFloat(res.upload_bps) || 0;
+
+                $('#tm_download_rate').text(res.download_fmt || '0 bps');
+                $('#tm_upload_rate').text(res.upload_fmt || '0 bps');
+
+                var now = new Date();
+                var timeStr = now.toLocaleTimeString();
+
+                tmState.downloadHistory.push(downBps);
+                tmState.uploadHistory.push(upBps);
+                tmState.timeLabels.push(timeStr);
+
+                if (tmState.downloadHistory.length > tmState.maxPoints) {
+                    tmState.downloadHistory.shift();
+                    tmState.uploadHistory.shift();
+                    tmState.timeLabels.shift();
+                }
+
+                updateStatsSummary();
+                updateChartData();
+            }
+        },
+        complete: function() {
+            tmState.isFetching = false;
+            if (tmState.isOpen && Date.now() < tmState.endTime) {
+                // Fixed gap between requests as configured in settings (e.g. 500ms)
+                tmState.pollTimeout = setTimeout(pollTrafficChained, tmPollMs);
+            } else if (tmState.isOpen && Date.now() >= tmState.endTime) {
+                setTrafficStatusUI(false);
+            }
+        }
+    });
+}
+
+function updateStatsSummary() {
+    if (!tmState.downloadHistory.length) return;
+
+    var dMin = Infinity, dMax = 0, dSum = 0;
+    var uMin = Infinity, uMax = 0, uSum = 0;
+
+    for (var i = 0; i < tmState.downloadHistory.length; i++) {
+        var d = tmState.downloadHistory[i];
+        if (d < dMin) dMin = d;
+        if (d > dMax) dMax = d;
+        dSum += d;
+
+        var u = tmState.uploadHistory[i];
+        if (u < uMin) uMin = u;
+        if (u > uMax) uMax = u;
+        uSum += u;
+    }
+
+    var count = tmState.downloadHistory.length;
+    var dAvg = dSum / count;
+    var uAvg = uSum / count;
+    if (dMin === Infinity) dMin = 0;
+    if (uMin === Infinity) uMin = 0;
+
+    $('#tm_download_stats').text('Min: ' + formatBpsJs(dMin) + ' | Avg: ' + formatBpsJs(dAvg) + ' | Max: ' + formatBpsJs(dMax));
+    $('#tm_upload_stats').text('Min: ' + formatBpsJs(uMin) + ' | Avg: ' + formatBpsJs(uAvg) + ' | Max: ' + formatBpsJs(uMax));
+}
+
+function initChartJs() {
+    var canvas = document.getElementById('tm_chart_canvas');
+    if (!canvas) return;
+    var ctx = canvas.getContext('2d');
+
+    if (tmState.chart) {
+        tmState.chart.destroy();
+        tmState.chart = null;
+    }
+
+    var gradDown = ctx.createLinearGradient(0, 0, 0, 190);
+    gradDown.addColorStop(0, 'rgba(29, 114, 184, 0.18)');
+    gradDown.addColorStop(1, 'rgba(29, 114, 184, 0.01)');
+
+    var gradUp = ctx.createLinearGradient(0, 0, 0, 190);
+    gradUp.addColorStop(0, 'rgba(126, 34, 206, 0.18)');
+    gradUp.addColorStop(1, 'rgba(126, 34, 206, 0.01)');
+
+    tmState.chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: tmState.timeLabels,
+            datasets: [
+                {
+                    label: 'Download (TX)',
+                    data: tmState.downloadHistory,
+                    borderColor: '#1d72b8',
+                    backgroundColor: gradDown,
+                    fill: true,
+                    tension: 0.35,
+                    borderWidth: 2.5,
+                    pointRadius: 2.5,
+                    pointHoverRadius: 5,
+                    pointBackgroundColor: '#1d72b8'
+                },
+                {
+                    label: 'Upload (RX)',
+                    data: tmState.uploadHistory,
+                    borderColor: '#7e22ce',
+                    backgroundColor: gradUp,
+                    fill: true,
+                    tension: 0.35,
+                    borderWidth: 2.5,
+                    pointRadius: 2.5,
+                    pointHoverRadius: 5,
+                    pointBackgroundColor: '#7e22ce'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top',
+                    align: 'center',
+                    labels: {
+                        usePointStyle: false,
+                        boxWidth: 26,
+                        boxHeight: 12,
+                        font: {
+                            size: 11,
+                            weight: '600',
+                            family: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                        },
+                        color: '#475569',
+                        padding: 12
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(30, 41, 59, 0.95)',
+                    titleFont: { size: 11, weight: 'bold' },
+                    bodyFont: { size: 11 },
+                    padding: 8,
+                    cornerRadius: 4,
+                    callbacks: {
+                        label: function(context) {
+                            return context.dataset.label + ': ' + formatBpsJs(context.raw);
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: {
+                        maxTicksLimit: 7,
+                        font: { size: 10 },
+                        color: '#94a3b8'
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    grid: {
+                        color: '#f1f5f9'
+                    },
+                    border: { display: false },
+                    ticks: {
+                        font: { size: 10 },
+                        color: '#64748b',
+                        callback: function(val) {
+                            return formatBpsJs(val);
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function updateChartData() {
+    if (!tmState.chart) return;
+    tmState.chart.data.labels = tmState.timeLabels;
+    tmState.chart.data.datasets[0].data = tmState.downloadHistory;
+    tmState.chart.data.datasets[1].data = tmState.uploadHistory;
+    tmState.chart.update('none'); // Update without animation lag
+}
+
+function formatBpsJs(bps) {
+    if (!bps || bps <= 0) return '0 bps';
+    if (bps >= 1000000000) return (bps / 1000000000).toFixed(2) + ' Gbps';
+    if (bps >= 1000000) return (bps / 1000000).toFixed(2) + ' Mbps';
+    if (bps >= 1000) return (bps / 1000).toFixed(2) + ' Kbps';
+    return Math.round(bps) + ' bps';
 }
 
 // ── Developer Popups & Easter Egg ──

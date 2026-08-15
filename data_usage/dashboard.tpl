@@ -24,6 +24,11 @@ table th {
     border-color: #cbd5e1;
     color: inherit;
 }
+.router-card.router-card-loading {
+    pointer-events: none !important;
+    cursor: wait !important;
+    opacity: 0.75;
+}
 .router-card-offline {
     background: #fff5f5 !important;
     border-color: #fecaca !important;
@@ -66,6 +71,60 @@ table th {
     color: #94a3b8;
     text-align: center;
     font-weight: 500;
+}
+
+/* 8-Dot Circular Spinner */
+.dot-spinner {
+    position: relative;
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    margin: 2px auto;
+}
+.dot-spinner-item {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+.dot-spinner-item::before {
+    content: '';
+    display: block;
+    margin: 0 auto;
+    width: 5px;
+    height: 5px;
+    background-color: #0ca678;
+    border-radius: 100%;
+    animation: dotSpinnerFade 1.2s infinite ease-in-out both;
+}
+.dot-spinner-item:nth-child(1) { transform: rotate(0deg); }
+.dot-spinner-item:nth-child(2) { transform: rotate(45deg); }
+.dot-spinner-item:nth-child(3) { transform: rotate(90deg); }
+.dot-spinner-item:nth-child(4) { transform: rotate(135deg); }
+.dot-spinner-item:nth-child(5) { transform: rotate(180deg); }
+.dot-spinner-item:nth-child(6) { transform: rotate(225deg); }
+.dot-spinner-item:nth-child(7) { transform: rotate(270deg); }
+.dot-spinner-item:nth-child(8) { transform: rotate(315deg); }
+
+.dot-spinner-item:nth-child(1)::before { animation-delay: -1.05s; }
+.dot-spinner-item:nth-child(2)::before { animation-delay: -0.9s; }
+.dot-spinner-item:nth-child(3)::before { animation-delay: -0.75s; }
+.dot-spinner-item:nth-child(4)::before { animation-delay: -0.6s; }
+.dot-spinner-item:nth-child(5)::before { animation-delay: -0.45s; }
+.dot-spinner-item:nth-child(6)::before { animation-delay: -0.3s; }
+.dot-spinner-item:nth-child(7)::before { animation-delay: -0.15s; }
+.dot-spinner-item:nth-child(8)::before { animation-delay: 0s; }
+
+@keyframes dotSpinnerFade {
+    0%, 39%, 100% {
+        opacity: 0.2;
+        transform: scale(0.6);
+    }
+    40% {
+        opacity: 1;
+        transform: scale(1.15);
+    }
 }
 </style>
 
@@ -116,16 +175,25 @@ table th {
     {else}
     {foreach $routerCards as $rc}
     <div class="col-md-3 col-sm-6 col-xs-12">
-        <a href="{$_url}plugin/data_usage_admin&router={$rc['id']}" id="router_card_{$rc['id']}" class="router-card {if !$rc['online']}router-card-offline{/if}" data-router-id="{$rc['id']}">
+        <a href="{$_url}plugin/data_usage_admin&router={$rc['id']}" id="router_card_{$rc['id']}" class="router-card router-card-loading {if !$rc['online']}router-card-offline{/if}" data-router-id="{$rc['id']}">
             <!-- Router Name (Centered) -->
             <h4 id="rc_name_{$rc['id']}" style="margin: 0 0 6px 0; font-size: 15px; font-weight: 700; color: {if $rc['online']}#1e293b{else}#991b1b{/if}; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                 {$rc['name']}
             </h4>
 
-            <!-- Online User Count Only -->
-            <div id="rc_body_{$rc['id']}" class="text-center" style="padding: 2px 0;">
-                <div class="stat-number-online" id="rc_count_{$rc['id']}">
-                    {$rc['online_count']} <i class="fa fa-circle-o-notch fa-spin text-muted rc-spin" style="font-size: 11px; vertical-align: middle; opacity: 0.5;" id="rc_spin_{$rc['id']}"></i>
+            <!-- Online User Count / Dot Spinner -->
+            <div id="rc_body_{$rc['id']}" class="text-center" style="padding: 2px 0; min-height: 44px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+                <div class="stat-number-online" id="rc_count_{$rc['id']}" style="min-height: 24px; display: flex; align-items: center; justify-content: center;">
+                    <div class="dot-spinner" id="rc_spin_{$rc['id']}">
+                        <div class="dot-spinner-item"></div>
+                        <div class="dot-spinner-item"></div>
+                        <div class="dot-spinner-item"></div>
+                        <div class="dot-spinner-item"></div>
+                        <div class="dot-spinner-item"></div>
+                        <div class="dot-spinner-item"></div>
+                        <div class="dot-spinner-item"></div>
+                        <div class="dot-spinner-item"></div>
+                    </div>
                 </div>
                 <div class="stat-label" id="rc_label_{$rc['id']}">Online</div>
             </div>
@@ -480,6 +548,7 @@ $(document).ready(function() {
                 type: 'GET',
                 dataType: 'json',
                 success: function(res) {
+                    $card.removeClass('router-card-loading');
                     $spin.remove();
                     if (res.status === 'success' && res.routers && res.routers[rId]) {
                         var data = res.routers[rId];
@@ -499,6 +568,7 @@ $(document).ready(function() {
                     }
                 },
                 error: function() {
+                    $card.removeClass('router-card-loading');
                     $spin.remove();
                 }
             });

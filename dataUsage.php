@@ -21,6 +21,7 @@ register_menu("", true, "data_usage_install_poller", "", "", '', '', ['SuperAdmi
 register_menu("", true, "data_usage_manage_profile_scripts", "", "", '', '', ['SuperAdmin', 'Admin']);
 register_menu("", true, "data_usage_live_status", "", "", '', '', ['SuperAdmin', 'Admin']);
 register_menu("", true, "data_usage_async_routers_status", "", "", '', '', ['SuperAdmin', 'Admin']);
+register_menu("", true, "data_usage_live_traffic", "", "", '', '', ['SuperAdmin', 'Admin']);
 
 // Register Public Webhook & API Endpoints
 register_menu("", false, "data_usage_webhook", "", "");
@@ -147,6 +148,25 @@ function data_usage_format_bytes($bytes, $precision = 2)
     $pow = min($pow, count($units) - 1);
     $bytes /= pow(1024, $pow);
     return round($bytes, $precision) . ' ' . $units[$pow];
+}
+
+/**
+ * Format bits per second to readable rate (bps, Kbps, Mbps, Gbps)
+ */
+function data_usage_format_bps($bps, $precision = 2)
+{
+    $bps = (float)$bps;
+    if ($bps <= 0) return '0 bps';
+    if ($bps >= 1000000000) {
+        return round($bps / 1000000000, $precision) . ' Gbps';
+    }
+    if ($bps >= 1000000) {
+        return round($bps / 1000000, $precision) . ' Mbps';
+    }
+    if ($bps >= 1000) {
+        return round($bps / 1000, 1) . ' Kbps';
+    }
+    return round($bps, 0) . ' bps';
 }
 
 /**
@@ -310,13 +330,14 @@ function data_usage_clean_mac($mac)
 }
 
 /**
- * Helper to generate a collision-free Hotspot session ID (e.g. "hs_cc2d215df1b0_1723648500").
+ * Helper to generate a collision-free Hotspot session ID in clean hex format (e.g. "hs81a029bf").
  */
 function data_usage_generate_hotspot_session_id($username, $mac, $startTimeEpoch = 0)
 {
     $cleanMac = data_usage_clean_mac($mac);
     $ts = ($startTimeEpoch > 0) ? (int)$startTimeEpoch : time();
-    return 'hs_' . ($cleanMac ?: preg_replace('/[^a-zA-Z0-9_]/', '', $username)) . '_' . $ts;
+    $hash = sprintf('%08x', crc32($username . '|' . $cleanMac . '|' . $ts));
+    return 'hs' . $hash;
 }
 
 /**
@@ -393,7 +414,7 @@ function data_usage_webhook()
 
         if ($service === 'Hotspot') {
             // Hotspot: clean MAC address & timestamp
-            $sessionId = !empty($rawSid) && strpos($rawSid, 'hs_') === 0 
+            $sessionId = !empty($rawSid) && (strpos($rawSid, 'hs') === 0 || strpos($rawSid, 'hs_') === 0)
                 ? data_usage_clean_session_id($rawSid, $username, $mac) 
                 : data_usage_generate_hotspot_session_id($username, $mac, strtotime($realStartTime));
         } else {
@@ -822,7 +843,7 @@ function data_usage_get_direct_live_sessions($router)
                     $rawSid = $hs->getProperty('session-id') ?: '';
                     
                     $calcStartTime = date('Y-m-d H:i:s', time() - data_usage_uptime_to_seconds($uptime));
-                    $sId = !empty($rawSid) && strpos($rawSid, 'hs_') === 0 
+                    $sId = !empty($rawSid) && (strpos($rawSid, 'hs') === 0 || strpos($rawSid, 'hs_') === 0)
                         ? $rawSid 
                         : data_usage_generate_hotspot_session_id($uName, $mac, strtotime($calcStartTime));
 
@@ -1351,6 +1372,7 @@ function data_usage_user()
     $ui->assign('activeSessionId', $activeSessionId);
     $ui->assign('activeRouterId', $activeRouterId);
     $ui->assign('activeService', $activeService);
+    $ui->assign('trafficPollMs', (int)data_usage_get_config('data_usage_traffic_poll_ms', '100'));
     $ui->assign('csrf_token', Csrf::generateAndStoreToken());
 
     $ui->display('data_usage/user_details.tpl');
@@ -1364,6 +1386,16 @@ function data_usage_scripts()
     global $ui;
     _admin();
     $admin = Admin::_info();
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_traffic_settings'])) {
+        $csrf_token = $_POST['csrf_token'] ?? '';
+        if (!Csrf::check($csrf_token)) {
+            r2(getUrl('plugin/data_usage_scripts'), 'e', 'Security token expired. Please try again.');
+        }
+        $pollMs = max(30, min(5000, (int)($_POST['traffic_poll_ms'] ?? 100)));
+        data_usage_set_config('data_usage_traffic_poll_ms', (string)$pollMs);
+        r2(getUrl('plugin/data_usage_scripts'), 's', 'Traffic monitor polling interval updated to ' . $pollMs . ' ms.');
+    }
 
     $ui->assign('_system_menu', 'plugin/data_usage_admin');
     $ui->assign('_admin', $admin);
@@ -1432,6 +1464,7 @@ function data_usage_scripts()
     $ui->assign('hsProfiles', $hsProfiles);
     $ui->assign('webhookUrl', $webhookUrl);
     $ui->assign('appUrl', $appUrl);
+    $ui->assign('trafficPollMs', (int)data_usage_get_config('data_usage_traffic_poll_ms', '100'));
     $ui->assign('cronInfo', data_usage_get_cron_info());
     $ui->assign('csrf_token', Csrf::generateAndStoreToken());
 
@@ -1908,6 +1941,144 @@ function data_usage_async_routers_status()
         'routers' => $results
     ]);
     exit;
+}
+
+/**
+ * 4.2 Live User Traffic Monitor Endpoint (High-Frequency Polling)
+ */
+function data_usage_live_traffic()
+{
+    if (php_sapi_name() !== 'cli') {
+        _admin();
+    }
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+    header('Content-Type: application/json; charset=utf-8');
+
+    $routerId = isset($_REQUEST['router_id']) ? (int)$_REQUEST['router_id'] : 0;
+    $username = isset($_REQUEST['username']) ? trim((string)$_REQUEST['username']) : '';
+    $service  = isset($_REQUEST['service']) ? trim((string)$_REQUEST['service']) : 'PPPoE';
+
+    if ($routerId <= 0 || empty($username)) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid router or username']);
+        exit;
+    }
+
+    $router = ORM::for_table('tbl_routers')->where('enabled', '1')->find_one($routerId);
+    if (!$router) {
+        echo json_encode(['status' => 'error', 'message' => 'Router not found or disabled']);
+        exit;
+    }
+
+    try {
+        $client = data_usage_get_mikrotik_client($router, 2.5);
+        if (!$client) {
+            echo json_encode(['status' => 'error', 'message' => 'Failed to connect to MikroTik']);
+            exit;
+        }
+
+        $uploadBps = 0;
+        $downloadBps = 0;
+        $isOnline = false;
+
+        if (strtolower($service) === 'hotspot') {
+            // 1. Hotspot: query queue/simple (<hotspot-username>)
+            $foundQueue = false;
+            try {
+                $qReq = new RouterOS\Request('/queue/simple/print');
+                $qReq->setQuery(RouterOS\Query::where('name', '<hotspot-' . $username . '>'));
+                $qRes = $client->sendSync($qReq);
+                foreach ($qRes as $q) {
+                    if ($q->getType() === RouterOS\Response::TYPE_DATA) {
+                        $rateStr = (string)$q->getProperty('rate');
+                        if (!empty($rateStr)) {
+                            $parts = explode('/', $rateStr);
+                            if (count($parts) >= 2) {
+                                $uploadBps = (float)$parts[0];   // Client upload (rx)
+                                $downloadBps = (float)$parts[1]; // Client download (tx)
+                                $foundQueue = true;
+                                $isOnline = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            } catch (Exception $eQ) {}
+
+            // Fallback: check queue where name is $username
+            if (!$foundQueue) {
+                try {
+                    $qReq = new RouterOS\Request('/queue/simple/print');
+                    $qReq->setQuery(RouterOS\Query::where('name', $username));
+                    $qRes = $client->sendSync($qReq);
+                    foreach ($qRes as $q) {
+                        if ($q->getType() === RouterOS\Response::TYPE_DATA) {
+                            $rateStr = (string)$q->getProperty('rate');
+                            if (!empty($rateStr)) {
+                                $parts = explode('/', $rateStr);
+                                if (count($parts) >= 2) {
+                                    $uploadBps = (float)$parts[0];
+                                    $downloadBps = (float)$parts[1];
+                                    $foundQueue = true;
+                                    $isOnline = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception $eQ2) {}
+            }
+
+            if (!$foundQueue) {
+                // Check if user is in /ip/hotspot/active
+                try {
+                    $hsReq = new RouterOS\Request('/ip/hotspot/active/print');
+                    $hsReq->setQuery(RouterOS\Query::where('user', $username));
+                    $hsRes = $client->sendSync($hsReq);
+                    foreach ($hsRes as $hs) {
+                        if ($hs->getType() === RouterOS\Response::TYPE_DATA && !empty($hs->getProperty('user'))) {
+                            $isOnline = true;
+                            break;
+                        }
+                    }
+                } catch (Exception $eHs) {}
+            }
+        } else {
+            // 2. PPPoE: monitor dynamic interface <pppoe-username>
+            try {
+                $ifReq = new RouterOS\Request('/interface/monitor-traffic');
+                $ifReq->setArgument('interface', '<pppoe-' . $username . '>');
+                $ifReq->setArgument('once', '');
+                $ifRes = $client->sendSync($ifReq);
+                foreach ($ifRes as $item) {
+                    if ($item->getType() === RouterOS\Response::TYPE_DATA) {
+                        $uploadBps   = (float)$item->getProperty('rx-bits-per-second'); // Client upload
+                        $downloadBps = (float)$item->getProperty('tx-bits-per-second'); // Client download
+                        $isOnline    = true;
+                        break;
+                    }
+                }
+            } catch (Exception $eIf) {}
+        }
+
+        echo json_encode([
+            'status'       => 'success',
+            'online'       => $isOnline,
+            'service'      => $service,
+            'username'     => $username,
+            'upload_bps'   => $uploadBps,
+            'download_bps' => $downloadBps,
+            'upload_fmt'   => data_usage_format_bps($uploadBps),
+            'download_fmt' => data_usage_format_bps($downloadBps),
+            'poll_ms'      => (int)data_usage_get_config('data_usage_traffic_poll_ms', '500'),
+            'timestamp'    => microtime(true)
+        ]);
+        exit;
+    } catch (Exception $e) {
+        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+        exit;
+    }
 }
 
 
