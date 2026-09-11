@@ -4,17 +4,18 @@
 table th {
     text-transform: none !important;
     font-weight: 600 !important;
+    white-space: nowrap !important;
 }
 </style>
 
 <div class="row" style="margin-bottom: 20px;">
     <div class="col-md-12" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <div style="display: flex; align-items: center; gap: 12px;">
-            <a href="javascript:history.back()" class="btn btn-sm btn-default" style="font-weight: 600; border-radius: 8px;">
+            <a href="javascript:history.back()" class="btn btn-sm btn-default" style="font-weight: 600; border-radius: 6px;">
                 <i class="fa fa-arrow-left"></i> Back
             </a>
             <h3 class="data-usage-header-title" style="margin: 0; font-size: 22px; font-weight: 700; color: #1e293b; cursor: pointer;" title="Data Usage Engine">
-                <i class="fa fa-user text-primary"></i> User Details &mdash; {$username} {if $targetRouter}<span style="font-size: 16px; font-weight: normal; color: #64748b;">({$targetRouter->name})</span>{/if}
+                <i class="fa fa-user text-primary"></i> User Details - {$username} {if $targetRouter}<span style="font-size: 16px; font-weight: normal; color: #64748b;">({$targetRouter->name})</span>{/if}
             </h3>
         </div>
         <div class="btn-group">
@@ -24,98 +25,90 @@ table th {
             <a class="btn btn-warning btn-xs" href="{$_url}plugin/data_usage_scripts">
                 <i class="fa fa-cogs"></i> Settings
             </a>
+            <a class="btn btn-info btn-xs" href="{$_url}plugin/data_usage_logs">
+                <i class="fa fa-list-alt"></i> Logs
+            </a>
         </div>
     </div>
 </div>
 
-<!-- Customer Information & All-Time Stats -->
-<div class="row">
-    <div class="col-md-4">
-        {*
-        <!-- Customer Information Section (Uncomment to re-enable in future) -->
-        <div class="panel panel-hovered mb20 panel-primary">
-            <div class="panel-heading">
-                Customer Information
+<!-- Stat Cards: All-Time & Monthly Usage -->
+<div class="row" style="margin-bottom: 20px;">
+    <div class="col-sm-6 col-xs-12">
+        <div class="small-box bg-purple" style="border-radius: 8px; margin-bottom: 10px;">
+            <div class="inner" style="padding: 12px 16px 10px 16px;">
+                <h4 class="text-bold" style="font-size: large; margin: 0 0 2px 0;">{$allTimeBytesFmt}</h4>
+                <p style="margin: 0; font-size: 12px; opacity: 0.9;">All-Time Usage</p>
             </div>
-            <div class="panel-body">
-                <table class="table table-condensed" style="margin-bottom: 0;">
-                    <tr>
-                        <th style="width: 100px;">Username:</th>
-                        <td><strong>{$username}</strong></td>
-                    </tr>
-                    <tr>
-                        <th>Full Name:</th>
-                        <td>{$customer->fullname|default:'-'}</td>
-                    </tr>
-                    <tr>
-                        <th>Phone:</th>
-                        <td>{$customer->phonenumber|default:'-'}</td>
-                    </tr>
-                    <tr>
-                        <th>Email:</th>
-                        <td>{$customer->email|default:'-'}</td>
-                    </tr>
-                    <tr>
-                        <th>Address:</th>
-                        <td>{$customer->address|default:'-'}</td>
-                    </tr>
-                </table>
-            </div>
-        </div>
-        *}
-
-        <div class="small-box bg-purple">
-            <div class="inner">
-                <h4 class="text-bold" style="font-size: large;">{$allTimeBytesFmt}</h4>
-            </div>
-            <div class="icon">
-                <i class="ion ion-ios-pulse-strong"></i>
-            </div>
-            <a href="#" class="small-box-footer">All-Time Tracked Data Usage</a>
+            <a href="javascript:void(0)" class="small-box-footer" style="padding: 4px 16px; text-align: left; font-size: 11px; cursor: default;">
+                Total Tracked Data
+            </a>
         </div>
     </div>
 
-    <!-- Daily Breakdown -->
-    <div class="col-md-8">
-        <div class="panel panel-hovered mb20 panel-primary">
-            <div class="panel-heading">
-                Daily Usage Summary (Last 30 Days)
+    <div class="col-sm-6 col-xs-12">
+        <div class="small-box bg-aqua" style="border-radius: 8px; margin-bottom: 10px; cursor: pointer;" data-toggle="modal" data-target="#dailyUsageModal">
+            <div class="inner" style="padding: 12px 16px 10px 16px;">
+                <h4 class="text-bold" style="font-size: large; margin: 0 0 2px 0;">{$monthlyBytesFmt}</h4>
+                <p style="margin: 0; font-size: 12px; opacity: 0.9;">{$currentMonthName}</p>
             </div>
-            <div class="table-responsive" style="max-height: 290px; overflow-y: auto;">
-                <table class="table table-bordered table-striped" style="margin-bottom: 0;">
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Service</th>
-                            <th>Upload</th>
-                            <th>Download</th>
-                            <th>Total Usage</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {if count($dailySummary) == 0}
-                        <tr>
-                            <td colspan="5" class="text-center text-muted" style="padding: 20px;">No daily usage records available.</td>
-                        </tr>
-                        {else}
-                        {foreach $dailySummary as $d}
-                        <tr>
-                            <td>{$d['usage_date']}</td>
-                            <td>
-                                {if $d['service'] == 'PPPoE'}
-                                <span class="label label-primary">PPPoE</span>
-                                {else}
-                                <span class="label label-warning">Hotspot</span>
-                                {/if}
-                            </td>
-                            <td>{$d['bytes_in_fmt']}</td>
-                            <td>{$d['bytes_out_fmt']}</td>
-                            <td><strong>{$d['total_bytes_fmt']}</strong></td>
-                        </tr>
-                        {/foreach}
-                        {/if}
-                    </tbody>
-                </table>
+            <a href="javascript:void(0)" class="small-box-footer" style="padding: 4px 16px; text-align: left; font-size: 11px;">
+                Daily Usage
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Daily Usage Table -->
+<div class="modal fade" id="dailyUsageModal" tabindex="-1" role="dialog" aria-labelledby="dailyUsageModalLabel">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content" style="border-radius: 8px;">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title" id="dailyUsageModalLabel" style="font-weight: 700;">
+                    Daily Usage (Last 30 Days) - {$username}
+                </h4>
+            </div>
+            <div class="modal-body" style="padding: 0;">
+                <div class="table-responsive" style="max-height: 450px; overflow-y: auto;">
+                    <table class="table table-bordered table-striped" style="margin-bottom: 0;">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Service</th>
+                                <th>Upload</th>
+                                <th>Download</th>
+                                <th>Total Usage</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {if count($dailySummary) == 0}
+                            <tr>
+                                <td colspan="5" class="text-center text-muted" style="padding: 20px;">No daily usage records available.</td>
+                            </tr>
+                            {else}
+                            {foreach $dailySummary as $d}
+                            <tr>
+                                <td>{$d['usage_date']}</td>
+                                <td>
+                                    {if $d['service'] == 'PPPoE'}
+                                    <span class="label label-primary">PPPoE</span>
+                                    {else}
+                                    <span class="label label-warning">Hotspot</span>
+                                    {/if}
+                                </td>
+                                <td>{$d['bytes_in_fmt']}</td>
+                                <td>{$d['bytes_out_fmt']}</td>
+                                <td><strong>{$d['total_bytes_fmt']}</strong></td>
+                            </tr>
+                            {/foreach}
+                            {/if}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default btn-sm" data-dismiss="modal" style="font-weight: 600;">Close</button>
             </div>
         </div>
     </div>
@@ -126,11 +119,11 @@ table th {
     <div class="col-md-12">
         <div class="panel panel-hovered mb20 panel-primary">
             <div class="panel-heading" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                <span style="font-weight: 700;">Session Logs (Recent 100 Sessions)</span>
+                <span style="font-weight: 700;">Recent Sessions (Last 100)</span>
                 <div style="display: flex; align-items: center; gap: 6px;">
                     {if !empty($routers) && count($routers) > 0}
                     <button type="button" class="btn btn-xs btn-default" onclick="checkLiveStatus('{$username}', '{$userRouterId}', 'all', this)" style="font-weight: 600;">
-                        <i class="fa fa-refresh"></i> Refresh Live Status
+                        Check Live Status
                     </button>
                     <button type="button" class="btn btn-xs btn-info" onclick="openTrafficModal('{$username}', '{$userRouterId}', '{$userService}')" style="font-weight: 600; background-color: #0284c7; border-color: #0284c7;">
                         Monitor Traffic
@@ -236,7 +229,7 @@ table th {
                     Live
                 </span>
                 <h4 class="modal-title" style="margin: 0; font-size: 15px; font-weight: 700; color: #1e293b; text-align: left;">
-                    Live Traffic &mdash; <span id="tm_username">{$username}</span>
+                    Live Traffic - <span id="tm_username">{$username}</span>
                 </h4>
             </div>
             <div class="modal-body" style="padding: 16px; background: #fafafa;">
@@ -684,8 +677,8 @@ function initDeveloperPopups() {
                   '<i class="fa fa-code fa-2x" style="color:#3c8dbc; margin-bottom:10px;"></i>' +
                   '<p style="font-size:14px; margin-bottom:4px;">Developed by <b>Mahmud</b></p>' +
                   '<p style="font-size:12px; color:#64748b; margin-bottom:16px;">Commercial Edition for SysTik</p>' +
-                  '<a href="https://wa.me/+8801540221898?text=I%20want%20to%20help%20you%20buy%20a%20meal" target="_blank" class="btn btn-success btn-sm" style="border-radius:20px; padding:6px 16px;">' +
-                  '<i class="fa fa-whatsapp"></i> Donate / Buy a Meal ☕' +
+                  '<a href="https://wa.me/+8801540221898?text=Support" target="_blank" class="btn btn-success btn-sm" style="border-radius:20px; padding:6px 16px;">' +
+                  '<i class="fa fa-whatsapp"></i> Support' +
                   '</a>' +
                   '</div>',
             showConfirmButton: true,

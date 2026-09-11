@@ -14,6 +14,8 @@ register_menu("Data Usage", true, "data_usage_admin", "AFTER_REPORTS", "fa fa-ar
 register_menu("", true, "data_usage_history", "", "", '', '', ['SuperAdmin', 'Admin']);
 register_menu("", true, "data_usage_user", "", "", '', '', ['SuperAdmin', 'Admin']);
 register_menu("", true, "data_usage_scripts", "", "", '', '', ['SuperAdmin', 'Admin']);
+register_menu("", true, "data_usage_logs", "", "", '', '', ['SuperAdmin', 'Admin']);
+register_menu("", true, "data_usage_clear_logs", "", "", '', '', ['SuperAdmin', 'Admin']);
 register_menu("", true, "data_usage_sync", "", "", '', '', ['SuperAdmin', 'Admin']);
 register_menu("", true, "data_usage_export", "", "", '', '', ['SuperAdmin', 'Admin']);
 register_menu("", true, "data_usage_disconnect", "", "", '', '', ['SuperAdmin', 'Admin']);
@@ -29,8 +31,8 @@ register_menu("", false, "data_usage_collector", "", "");
 register_menu("", false, "data_usage_api", "", "");
 register_menu("", false, "dataUsage_webhook", "", "");
 
-define('DATA_USAGE_PLUGIN_VERSION', '1.0.6');
-define('DATA_USAGE_DB_VERSION', '1.0.4');
+define('DATA_USAGE_PLUGIN_VERSION', '1.0.7');
+define('DATA_USAGE_DB_VERSION', '1.0.5');
 
 /**
  * Auto-initialize Database Tables
@@ -115,6 +117,23 @@ function data_usage_init_db()
         ORM::raw_execute("ALTER TABLE tbl_data_usage_router_users ADD COLUMN IF NOT EXISTS missing_since DATETIME DEFAULT NULL");
     } catch (Exception $e) {}
 
+    // Event & Poller Logs Table
+    ORM::raw_execute("CREATE TABLE IF NOT EXISTS tbl_data_usage_logs (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        log_time DATETIME NOT NULL,
+        router_id INT NOT NULL DEFAULT 0,
+        router_name VARCHAR(100) DEFAULT '',
+        event_type VARCHAR(32) NOT NULL,
+        username VARCHAR(100) DEFAULT '',
+        details TEXT DEFAULT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'info',
+        ip_address VARCHAR(45) DEFAULT '',
+        INDEX idx_time (log_time),
+        INDEX idx_event (event_type),
+        INDEX idx_router (router_id),
+        INDEX idx_user (username)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
     data_usage_set_config('data_usage_db_version', DATA_USAGE_DB_VERSION);
 }
 
@@ -134,6 +153,40 @@ function data_usage_set_config($key, $value)
     }
     $row->value = (string)$value;
     $row->save();
+}
+
+/**
+ * Event & Activity Logger Helper
+ */
+function data_usage_log($eventType, $details, $status = 'info', $routerId = 0, $username = '', $routerName = '')
+{
+    try {
+        if ($routerId > 0 && empty($routerName)) {
+            $r = ORM::for_table('tbl_routers')->find_one($routerId);
+            if ($r) $routerName = $r->name;
+        }
+
+        $clientIp = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '';
+        if (strpos($clientIp, ',') !== false) {
+            $parts = explode(',', $clientIp);
+            $clientIp = trim($parts[0]);
+        }
+
+        $log = ORM::for_table('tbl_data_usage_logs')->create();
+        $log->log_time = date('Y-m-d H:i:s');
+        $log->router_id = (int)$routerId;
+        $log->router_name = (string)$routerName;
+        $log->event_type = (string)$eventType;
+        $log->username = (string)$username;
+        $log->details = (string)$details;
+        $log->status = (string)$status;
+        $log->ip_address = (string)$clientIp;
+        $log->save();
+
+        if (rand(1, 100) === 1) {
+            ORM::raw_execute("DELETE FROM tbl_data_usage_logs WHERE id < (SELECT min_id FROM (SELECT IFNULL(MIN(id), 0) as min_id FROM (SELECT id FROM tbl_data_usage_logs ORDER BY id DESC LIMIT 3000) as t) as t2)");
+        }
+    } catch (Exception $e) {}
 }
 
 /**
@@ -185,8 +238,8 @@ function data_usage_format_uptime($seconds)
     if ($days > 0) $out[] = $days . 'd';
     if ($hours > 0) $out[] = $hours . 'h';
     if ($mins > 0) $out[] = $mins . 'm';
-    if (empty($out) || ($days == 0 && $hours == 0)) $out[] = $secs . 's';
-    return implode(' ', $out);
+    if ($secs > 0 || empty($out)) $out[] = $secs . 's';
+    return implode('', $out);
 }
 
 /**
@@ -474,6 +527,15 @@ function data_usage_webhook()
         $session->close_reason = null;
         $session->save();
 
+        data_usage_log(
+            'session-start',
+            "User connected via {$service} (IP: " . ($session->ip_address ?: '-') . ", MAC: " . ($session->mac_address ?: '-') . ", SessionID: {$sessionId})",
+            'success',
+            $routerId,
+            $username,
+            $routerName
+        );
+
         echo json_encode([
             'status' => 'success',
             'action' => 'session-start',
@@ -554,6 +616,15 @@ function data_usage_webhook()
             $session->close_reason = $realCloseReason;
             $session->save();
 
+            data_usage_log(
+                'session-end',
+                "User disconnected ({$session->service}, Reason: {$realCloseReason}, Session: {$session->session_id}, Usage: " . data_usage_format_bytes($session->total_bytes) . ")",
+                'info',
+                $routerId,
+                $session->username,
+                $routerName
+            );
+
             echo json_encode([
                 'status' => 'success',
                 'action' => 'session-end',
@@ -567,6 +638,153 @@ function data_usage_webhook()
         }
 
         echo json_encode(['status' => 'not_found', 'message' => 'No active session found to close']);
+        exit;
+    }
+
+    // ─── 3. ACTION: BATCH-SYNC (dataUsagePoller 2-Minute Script) ───
+    $rawBatch = $json['batch'] ?? $_POST['batch'] ?? null;
+    if ($action === 'batch-sync' || !empty($rawBatch)) {
+        $batch = is_array($rawBatch) ? $rawBatch : (is_string($rawBatch) ? json_decode($rawBatch, true) : []);
+        if (!is_array($batch)) {
+            $batch = [];
+        }
+
+        if (empty($batch)) {
+            data_usage_log('batch-sync', 'Batch sync received with empty active sessions list', 'info', $routerId, '', $routerName);
+            echo json_encode([
+                'status' => 'success',
+                'action' => 'batch-sync',
+                'processed' => 0,
+                'message' => 'Batch list was empty'
+            ]);
+            exit;
+        }
+
+        $processedCount = 0;
+        $batchDeltaIn = 0;
+        $batchDeltaOut = 0;
+
+        foreach ($batch as $item) {
+            $iUser = trim($item['username'] ?? $item['user'] ?? '');
+            if (empty($iUser)) continue;
+
+            $iSvc   = trim($item['service'] ?? 'PPPoE');
+            $iMac   = trim($item['mac'] ?? $item['mac_address'] ?? '');
+            $iIp    = trim($item['ip'] ?? $item['ip_address'] ?? $item['address'] ?? '');
+            $rawUptime = trim($item['uptime'] ?? '');
+            $iUptime= !empty($rawUptime) ? data_usage_format_uptime(data_usage_uptime_to_seconds($rawUptime)) : '';
+            $iTx    = (float)($item['tx'] ?? $item['bytes_in'] ?? 0);
+            $iRx    = (float)($item['rx'] ?? $item['bytes_out'] ?? 0);
+            $rawSid = trim($item['session_id'] ?? $item['sid'] ?? '');
+
+            $sId = data_usage_clean_session_id($rawSid, $iUser, $iMac);
+
+            $session = ORM::for_table('tbl_data_usage_sessions')
+                ->where('router_id', $routerId)
+                ->where('session_id', $sId)
+                ->where('status', 'active')
+                ->find_one();
+
+            if (!$session) {
+                $session = ORM::for_table('tbl_data_usage_sessions')
+                    ->where('router_id', $routerId)
+                    ->where('username', $iUser)
+                    ->where('service', $iSvc)
+                    ->where('status', 'active')
+                    ->order_by_desc('last_seen')
+                    ->find_one();
+            }
+
+            if ($session) {
+                $deltaIn = ($iTx >= $session->last_bytes_in) ? ($iTx - $session->last_bytes_in) : $iTx;
+                $deltaOut = ($iRx >= $session->last_bytes_out) ? ($iRx - $session->last_bytes_out) : $iRx;
+
+                if ($deltaIn > 0 || $deltaOut > 0) {
+                    data_usage_add_daily_delta($routerId, $iUser, $iSvc, $iMac ?: $session->mac_address, $deltaIn, $deltaOut, $today);
+                    $batchDeltaIn += $deltaIn;
+                    $batchDeltaOut += $deltaOut;
+                }
+
+                $session->bytes_in = $iTx;
+                $session->bytes_out = $iRx;
+                $session->total_bytes = $iTx + $iRx;
+                $session->last_bytes_in = $iTx;
+                $session->last_bytes_out = $iRx;
+                $session->last_seen = $now;
+                $session->uptime = $iUptime ?: $session->uptime;
+                $session->ip_address = $iIp ?: $session->ip_address;
+                $session->mac_address = $iMac ?: $session->mac_address;
+                $session->save();
+            } else {
+                // Close older active collision sessions
+                $zombies = ORM::for_table('tbl_data_usage_sessions')
+                    ->where('router_id', $routerId)
+                    ->where('username', $iUser)
+                    ->where('status', 'active')
+                    ->find_many();
+
+                foreach ($zombies as $z) {
+                    $z->status = 'closed';
+                    $z->closed_time = $now;
+                    $z->close_reason = 'collision_reconnect';
+                    $z->save();
+                }
+
+                $calcStartTime = !empty($iUptime)
+                    ? date('Y-m-d H:i:s', time() - data_usage_uptime_to_seconds($iUptime))
+                    : $now;
+
+                $session = ORM::for_table('tbl_data_usage_sessions')->create();
+                $session->session_id = $sId;
+                $session->router_id = $routerId;
+                $session->router_name = $routerName;
+                $session->username = $iUser;
+                $session->service = $iSvc;
+                $session->ip_address = $iIp;
+                $session->mac_address = $iMac;
+                $session->uptime = $iUptime;
+                $session->status = 'active';
+                $session->bytes_in = $iTx;
+                $session->bytes_out = $iRx;
+                $session->total_bytes = $iTx + $iRx;
+                $session->last_bytes_in = $iTx;
+                $session->last_bytes_out = $iRx;
+                $session->start_time = $calcStartTime;
+                $session->last_seen = $now;
+                $session->closed_time = null;
+                $session->close_reason = null;
+                $session->save();
+
+                if ($iTx > 0 || $iRx > 0) {
+                    data_usage_add_daily_delta($routerId, $iUser, $iSvc, $iMac, $iTx, $iRx, $today);
+                    $batchDeltaIn += $iTx;
+                    $batchDeltaOut += $iRx;
+                }
+            }
+
+            $processedCount++;
+        }
+
+        data_usage_set_config('data_usage_last_sync_' . $routerId, $now);
+        data_usage_set_config('data_usage_last_cron_run', $now);
+
+        data_usage_log(
+            'batch-sync',
+            "Synced {$processedCount} active session(s). Delta: " . data_usage_format_bytes($batchDeltaIn + $batchDeltaOut) . " (Up: " . data_usage_format_bytes($batchDeltaIn) . ", Down: " . data_usage_format_bytes($batchDeltaOut) . ")",
+            'success',
+            $routerId,
+            '',
+            $routerName
+        );
+
+        echo json_encode([
+            'status' => 'success',
+            'action' => 'batch-sync',
+            'processed' => $processedCount,
+            'total_items' => count($batch),
+            'delta_in' => $batchDeltaIn,
+            'delta_out' => $batchDeltaOut
+        ]);
         exit;
     }
 
@@ -640,9 +858,27 @@ function data_usage_webhook()
             }
         }
 
+        data_usage_log(
+            'single-sync',
+            "Push sync for {$username} ({$service}, Total: " . data_usage_format_bytes($txBytes + $rxBytes) . ")",
+            'info',
+            $routerId,
+            $username,
+            $routerName
+        );
+
         echo json_encode(['status' => 'success', 'message' => 'Record updated', 'session_id' => $sId]);
         exit;
     }
+
+    data_usage_log(
+        'webhook-error',
+        "Invalid webhook request received. Action: '" . ($action ?: 'none') . "', User: '" . ($username ?: 'none') . "'",
+        'warning',
+        $routerId,
+        $username,
+        $routerName
+    );
 
     echo json_encode(['status' => 'error', 'message' => 'Invalid request']);
     exit;
@@ -1038,9 +1274,23 @@ function data_usage_admin()
                         $seenUsers[$key] = true;
                         $cust = ORM::for_table('tbl_customers')->where('username', $ds->username)->find_one();
                         $isLive = isset($liveMap[$key]) || isset($liveMap[strtolower($ds->username)]);
-                        if ($isLive) $onlineCount++; else $offlineCount++;
+                        if ($isLive) {
+                            $onlineCount++;
+                            if ($ds->status === 'active' && isset($liveMap[$key]['session_id']) && $ds->session_id !== $liveMap[$key]['session_id']) {
+                                $ds->status = 'closed';
+                                $ds->closed_time = $now;
+                                $ds->close_reason = 'New session started';
+                                $ds->save();
+                            }
+                        } else {
+                            $offlineCount++;
+                        }
+
+                        $uptimeVal = $isLive ? ($liveMap[$key]['uptime_fmt'] ?? $ds->uptime) : '';
+                        $uptimeFmt = !empty($uptimeVal) ? data_usage_format_uptime(data_usage_uptime_to_seconds($uptimeVal)) : '-';
 
                         $allUsers[] = [
+                            'id'              => $ds->id,
                             'username'        => $ds->username,
                             'fullname'        => $cust ? $cust->fullname : '',
                             'session_id'      => $ds->session_id,
@@ -1051,8 +1301,8 @@ function data_usage_admin()
                             'mac_address'     => $ds->mac_address,
                             'start_time'      => $ds->start_time,
                             'last_seen'       => $isLive ? ($liveMap[$key]['uptime_fmt'] ?? $ds->uptime) : ($ds->closed_time ?: $ds->last_seen),
-                            'uptime_fmt'      => $isLive ? ($liveMap[$key]['uptime_fmt'] ?? $ds->uptime) : '-',
-                            'uptime_seconds'  => $isLive ? data_usage_uptime_to_seconds($liveMap[$key]['uptime_fmt'] ?? $ds->uptime) : 0,
+                            'uptime_fmt'      => $uptimeFmt,
+                            'uptime_seconds'  => !empty($uptimeVal) ? data_usage_uptime_to_seconds($uptimeVal) : 0,
                             'bytes_in'        => (float)$ds->bytes_in,
                             'bytes_out'       => (float)$ds->bytes_out,
                             'total_bytes'     => (float)$ds->total_bytes,
@@ -1301,7 +1551,7 @@ function data_usage_user()
         $item['bytes_out_fmt'] = data_usage_format_bytes($s->bytes_out);
         $item['total_bytes_fmt'] = data_usage_format_bytes($s->total_bytes);
 
-        $duration = !empty($s->uptime) ? $s->uptime : data_usage_format_uptime(max(0, strtotime($s->closed_time ?: date('Y-m-d H:i:s')) - strtotime($s->start_time)));
+        $duration = !empty($s->uptime) ? data_usage_format_uptime(data_usage_uptime_to_seconds($s->uptime)) : data_usage_format_uptime(max(0, strtotime($s->closed_time ?: date('Y-m-d H:i:s')) - strtotime($s->start_time)));
         $item['duration_fmt'] = $duration;
         $allTimeBytes += (float)$s->total_bytes;
 
@@ -1356,6 +1606,19 @@ function data_usage_user()
     $activeService = $activeSession ? $activeSession->service : $userService;
     $routers = ORM::for_table('tbl_routers')->where('enabled', '1')->find_many();
 
+    // Monthly usage calculation (excluding today, as it is still running)
+    $monthStart = date('Y-m-01');
+    $today = date('Y-m-d');
+    $monthlyQuery = ORM::for_table('tbl_data_usage_daily')
+        ->where('username', $username)
+        ->where_gte('usage_date', $monthStart)
+        ->where_lt('usage_date', $today);
+    if ($routerId > 0) {
+        $monthlyQuery->where('router_id', $routerId);
+    }
+    $monthlySum = (float)($monthlyQuery->sum('total_bytes') ?: 0);
+    $monthlyBytesFmt = data_usage_format_bytes($monthlySum);
+
     $ui->assign('username', $username);
     $ui->assign('routerId', $routerId);
     $ui->assign('targetRouter', $targetRouter);
@@ -1365,6 +1628,8 @@ function data_usage_user()
     $ui->assign('sessions', $sessionsFormatted);
     $ui->assign('dailySummary', $dailyFormatted);
     $ui->assign('allTimeBytesFmt', data_usage_format_bytes($allTimeBytes));
+    $ui->assign('monthlyBytesFmt', $monthlyBytesFmt);
+    $ui->assign('currentMonthName', date('F'));
     $ui->assign('cronInfo', data_usage_get_cron_info());
     $ui->assign('routers', $routers);
     $ui->assign('userRouterId', $userRouterId);
@@ -1515,7 +1780,7 @@ function data_usage_manage_profile_scripts()
         . ':local iface [/interface find where name=$interface];' . "\n"
         . ':local linkUp [/interface get $iface last-link-up-time];' . "\n"
         . ':if ($sid = "") do={ :set sid $user; };' . "\n"
-        . ':log info ("dataUsage [PPPoE on-up]: User " . $user . " connected (IP: " . $address . ", MAC: " . $caller-id . ", SID: " . $sid . ")");' . "\n"
+        . ':log info ("dataUsage [PPPoE on-up]: User " . $user . " connected (IP: " . $address . ", MAC: " . $caller-id . ", SessionID: " . $sid . ")");' . "\n"
         . '/tool fetch url=$serverUrl http-method=post http-data="action=session-start&router=$routerId&service=PPPoE&username=$user&session_id=$sid&mac=$caller-id&ip=$address&start_time=$linkUp" keep-result=no;';
 
     $pppOnDown = ':local routerId "' . $routerId . '";' . "\n"
@@ -1592,6 +1857,90 @@ function data_usage_manage_profile_scripts()
 }
 
 /**
+ * 4.2 Event & Poller Logs Viewer
+ */
+function data_usage_logs()
+{
+    global $ui;
+    _admin();
+    $admin = Admin::_info();
+    data_usage_init_db();
+
+    $ui->assign('_system_menu', 'plugin/data_usage_admin');
+    $ui->assign('_admin', $admin);
+    $ui->assign('_title', 'Data Usage - Event Logs');
+
+    $ui->assign('xheader', '<link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.11.3/css/dataTables.bootstrap.min.css">');
+    $ui->assign('xfooter', '<script src="https://cdn.datatables.net/1.11.3/js/jquery.dataTables.min.js"></script><script src="https://cdn.datatables.net/1.11.3/js/dataTables.bootstrap.min.js"></script>');
+
+    $filterRouter = isset($_GET['router_id']) ? (int)$_GET['router_id'] : 0;
+    $filterEvent  = isset($_GET['event_type']) ? trim($_GET['event_type']) : '';
+    $filterStatus = isset($_GET['status']) ? trim($_GET['status']) : '';
+    $search       = isset($_GET['search']) ? trim($_GET['search']) : '';
+
+    $routers = ORM::for_table('tbl_routers')->where('enabled', '1')->find_many();
+
+    $query = ORM::for_table('tbl_data_usage_logs');
+    if ($filterRouter > 0) {
+        $query->where('router_id', $filterRouter);
+    }
+    if (!empty($filterEvent)) {
+        $query->where('event_type', $filterEvent);
+    }
+    if (!empty($filterStatus)) {
+        $query->where('status', $filterStatus);
+    }
+    if (!empty($search)) {
+        $query->where_raw('(username LIKE ? OR details LIKE ? OR ip_address LIKE ?)', ["%$search%", "%$search%", "%$search%"]);
+    }
+
+    $logs = $query->order_by_desc('id')->limit(1000)->find_many();
+
+    $logsFormatted = [];
+    foreach ($logs as $l) {
+        $logsFormatted[] = $l->as_array();
+    }
+
+    $ui->assign('routers', $routers);
+    $ui->assign('filterRouter', $filterRouter);
+    $ui->assign('filterEvent', $filterEvent);
+    $ui->assign('filterStatus', $filterStatus);
+    $ui->assign('search', $search);
+    $ui->assign('logs', $logsFormatted);
+    $ui->assign('totalLogs', count($logsFormatted));
+    $ui->assign('cronInfo', data_usage_get_cron_info());
+    $ui->assign('csrf_token', Csrf::generateAndStoreToken());
+
+    $ui->display('data_usage/logs.tpl');
+}
+
+/**
+ * 4.3 Clear / Prune Event Logs
+ */
+function data_usage_clear_logs()
+{
+    _admin();
+    $csrf_token = $_POST['csrf_token'] ?? $_GET['csrf_token'] ?? '';
+    if (!Csrf::check($csrf_token)) {
+        r2(getUrl('plugin/data_usage_logs'), 'e', 'Security token expired. Please try again.');
+    }
+
+    $keepDays = isset($_POST['keep_days']) ? (int)$_POST['keep_days'] : (isset($_GET['keep_days']) ? (int)$_GET['keep_days'] : 0);
+
+    if ($keepDays > 0) {
+        ORM::raw_execute("DELETE FROM tbl_data_usage_logs WHERE log_time < DATE_SUB(NOW(), INTERVAL " . (int)$keepDays . " DAY)");
+        $stmt = ORM::get_last_statement();
+        $deleted = $stmt ? $stmt->rowCount() : 0;
+        data_usage_log('system', "Cleaned logs older than $keepDays days ($deleted removed) by " . Admin::_info()->username, 'info');
+        r2(getUrl('plugin/data_usage_logs'), 's', "Logs older than $keepDays days have been deleted ($deleted removed).");
+    } else {
+        ORM::raw_execute("TRUNCATE TABLE tbl_data_usage_logs");
+        data_usage_log('system', 'All logs cleared by administrator ' . Admin::_info()->username, 'info');
+        r2(getUrl('plugin/data_usage_logs'), 's', 'All event logs have been cleared.');
+    }
+}
+
+/**
  * 4.2 Live Status Check (On-Demand Single User Direct MikroTik Query)
  */
 function data_usage_live_status()
@@ -1657,7 +2006,8 @@ function data_usage_query_live_user_status($router, $username, $service = 'all')
                     $rawSid   = $activePpp->getProperty('session-id') ?: ($activePpp->getProperty('.id') ?: $username);
                     $callerId = $activePpp->getProperty('caller-id') ?: '';
                     $ip       = $activePpp->getProperty('address') ?: '';
-                    $uptime   = $activePpp->getProperty('uptime') ?: '';
+                    $rawUptime= $activePpp->getProperty('uptime') ?: '';
+                    $uptime   = !empty($rawUptime) ? data_usage_format_uptime(data_usage_uptime_to_seconds($rawUptime)) : '';
                     $sId      = data_usage_clean_session_id($rawSid, $username, $callerId);
 
                     $rawTx = 0; $rawRx = 0; $linkUp = '';
@@ -1698,6 +2048,21 @@ function data_usage_query_live_user_status($router, $username, $service = 'all')
                         $session->save();
                     } else {
                         $realStartTime = data_usage_parse_routeros_datetime($linkUp, $uptime);
+
+                        // Close older active PPPoE sessions for this user on this router to avoid duplicates
+                        $oldSessions = ORM::for_table('tbl_data_usage_sessions')
+                            ->where('router_id', $router->id)
+                            ->where('username', $username)
+                            ->where('service', 'PPPoE')
+                            ->where('status', 'active')
+                            ->find_many();
+                        foreach ($oldSessions as $old) {
+                            $old->status = 'closed';
+                            $old->closed_time = $realStartTime ?: $now;
+                            $old->close_reason = 'new_session_detected';
+                            $old->save();
+                        }
+
                         $session = ORM::for_table('tbl_data_usage_sessions')->create();
                         $session->session_id = $sId;
                         $session->router_id = $router->id;
@@ -1794,8 +2159,9 @@ function data_usage_query_live_user_status($router, $username, $service = 'all')
                 if ($activeHs) {
                     $mac    = $activeHs->getProperty('mac-address') ?: '';
                     $ip     = $activeHs->getProperty('address') ?: '';
-                    $uptime = $activeHs->getProperty('uptime') ?: '';
-                    $rawRx  = (float)$activeHs->getProperty('bytes-in');
+                    $rawUptime= $activeHs->getProperty('uptime') ?: '';
+                    $uptime   = !empty($rawUptime) ? data_usage_format_uptime(data_usage_uptime_to_seconds($rawUptime)) : '';
+                    $rawRx    = (float)$activeHs->getProperty('bytes-in');
                     $rawTx  = (float)$activeHs->getProperty('bytes-out');
 
                     $sessionQuery = ORM::for_table('tbl_data_usage_sessions')
@@ -1828,6 +2194,23 @@ function data_usage_query_live_user_status($router, $username, $service = 'all')
                     } else {
                         $calcStartTime = date('Y-m-d H:i:s', time() - data_usage_uptime_to_seconds($uptime));
                         $sessionId = data_usage_generate_hotspot_session_id($username, $mac, strtotime($calcStartTime));
+
+                        // Close older active Hotspot sessions for this user on this router to avoid duplicates
+                        $oldSessions = ORM::for_table('tbl_data_usage_sessions')
+                            ->where('router_id', $router->id)
+                            ->where('username', $username)
+                            ->where('service', 'Hotspot')
+                            ->where('status', 'active');
+                        if (!empty($mac) && $mac !== '-') {
+                            $oldSessions->where('mac_address', $mac);
+                        }
+                        $oldSessionsList = $oldSessions->find_many();
+                        foreach ($oldSessionsList as $old) {
+                            $old->status = 'closed';
+                            $old->closed_time = $calcStartTime ?: $now;
+                            $old->close_reason = 'new_session_detected';
+                            $old->save();
+                        }
 
                         $session = ORM::for_table('tbl_data_usage_sessions')->create();
                         $session->session_id = $sessionId;
@@ -2516,6 +2899,8 @@ function data_usage_sync()
         $msg .= " (Errors: " . implode('; ', $errors) . ")";
     }
 
+    data_usage_log('cron-sync', $msg, !empty($errors) ? 'warning' : 'success', $routerId);
+
     if (php_sapi_name() === 'cli') {
         echo $msg . PHP_EOL;
         return;
@@ -2662,6 +3047,7 @@ function data_usage_disconnect()
     }
 
     if ($disconnected) {
+        data_usage_log('disconnect', "Admin disconnected user {$username} (SessionID: " . ($sessionId ?: '-') . ")", 'warning', $routerId, $username);
         r2($redirectUrl, 's', 'User session disconnected successfully');
     }
 

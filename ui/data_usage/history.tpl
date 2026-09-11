@@ -4,6 +4,7 @@
 table th {
     text-transform: none !important;
     font-weight: 600 !important;
+    white-space: nowrap !important;
 }
 </style>
 
@@ -11,11 +12,11 @@ table th {
 <div class="row" style="margin-bottom: 20px;">
     <div class="col-sm-12" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <div style="display: flex; align-items: center; gap: 12px;">
-            <a href="javascript:history.back()" class="btn btn-sm btn-default" style="font-weight: 600; border-radius: 8px;">
+            <a href="javascript:history.back()" class="btn btn-sm btn-default" style="font-weight: 600; border-radius: 6px;">
                 <i class="fa fa-arrow-left"></i> Back
             </a>
             <h3 style="margin: 0; font-size: 22px; font-weight: 700; color: #1e293b;">
-                <i class="fa fa-calendar text-primary"></i> Daily History
+                Daily Usage History
             </h3>
         </div>
         <div class="btn-group">
@@ -24,6 +25,9 @@ table th {
             </a>
             <a class="btn btn-warning btn-xs" href="{$_url}plugin/data_usage_scripts">
                 <i class="fa fa-cogs"></i> Settings
+            </a>
+            <a class="btn btn-info btn-xs" href="{$_url}plugin/data_usage_logs">
+                <i class="fa fa-list-alt"></i> Logs
             </a>
             <a class="btn btn-success btn-xs" href="{$_url}plugin/data_usage_export&start_date={$startDate}&end_date={$endDate}&router={$filterRouter}">
                 <i class="fa fa-download"></i> Export CSV
@@ -42,7 +46,7 @@ table th {
             <div class="icon">
                 <i class="ion ion-arrow-up-a"></i>
             </div>
-            <a href="#" class="small-box-footer">Upload ({$startDate} to {$endDate})</a>
+            <a href="#" class="small-box-footer">Total Upload</a>
         </div>
     </div>
     <div class="col-lg-4 col-xs-6">
@@ -53,7 +57,7 @@ table th {
             <div class="icon">
                 <i class="ion ion-arrow-down-a"></i>
             </div>
-            <a href="#" class="small-box-footer">Download ({$startDate} to {$endDate})</a>
+            <a href="#" class="small-box-footer">Total Download</a>
         </div>
     </div>
     <div class="col-lg-4 col-xs-12">
@@ -64,7 +68,7 @@ table th {
             <div class="icon">
                 <i class="ion ion-pie-graph"></i>
             </div>
-            <a href="#" class="small-box-footer">Total Consumed Bandwidth</a>
+            <a href="#" class="small-box-footer">Total Usage</a>
         </div>
     </div>
 </div>
@@ -74,7 +78,7 @@ table th {
     <div class="col-sm-12">
         <div class="panel panel-hovered mb20 panel-primary">
             <div class="panel-heading">
-                Daily Data Usage History
+                Daily Breakdown
             </div>
 
             <!-- Main Panel Body with Integrated Filter Toolbar -->
@@ -198,8 +202,8 @@ function initDeveloperPopups() {
                   '<i class="fa fa-code fa-2x" style="color:#3c8dbc; margin-bottom:10px;"></i>' +
                   '<p style="font-size:14px; margin-bottom:4px;">Developed by <b>Mahmud</b></p>' +
                   '<p style="font-size:12px; color:#64748b; margin-bottom:16px;">Commercial Edition for SysTik</p>' +
-                  '<a href="https://wa.me/+8801540221898?text=I%20want%20to%20help%20you%20buy%20a%20meal" target="_blank" class="btn btn-success btn-sm" style="border-radius:20px; padding:6px 16px;">' +
-                  '<i class="fa fa-whatsapp"></i> Donate / Buy a Meal ☕' +
+                  '<a href="https://wa.me/+8801540221898?text=Support" target="_blank" class="btn btn-success btn-sm" style="border-radius:20px; padding:6px 16px;">' +
+                  '<i class="fa fa-whatsapp"></i> Support' +
                   '</a>' +
                   '</div>',
             showConfirmButton: true,

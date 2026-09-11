@@ -4,6 +4,7 @@
 table th {
     text-transform: none !important;
     font-weight: 600 !important;
+    white-space: nowrap !important;
 }
 .router-card {
     background: #ffffff;
@@ -40,6 +41,48 @@ table th {
     box-shadow: 0 6px 16px rgba(239, 68, 68, 0.12) !important;
     border-color: #f87171 !important;
     color: inherit;
+}
+/* Dark Mode Support for Router Cards & Toolbar */
+body.dark-mode .router-card,
+.dark-mode .router-card {
+    background: #1e293b !important;
+    border-color: #334155 !important;
+    color: #f1f5f9 !important;
+}
+body.dark-mode .router-card:hover,
+.dark-mode .router-card:hover {
+    border-color: #64748b !important;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4) !important;
+}
+body.dark-mode .router-card .rc-title,
+.dark-mode .router-card .rc-title {
+    color: #f1f5f9 !important;
+}
+body.dark-mode .router-card .stat-label,
+.dark-mode .router-card .stat-label {
+    color: #94a3b8 !important;
+}
+body.dark-mode .router-card .sync-timestamp,
+.dark-mode .router-card .sync-timestamp {
+    color: #64748b !important;
+}
+body.dark-mode .router-card.router-card-offline,
+.dark-mode .router-card.router-card-offline {
+    background: rgba(239, 68, 68, 0.15) !important;
+    border-color: rgba(239, 68, 68, 0.3) !important;
+}
+body.dark-mode .router-card.router-card-offline .rc-title,
+.dark-mode .router-card.router-card-offline .rc-title {
+    color: #f87171 !important;
+}
+.filter-toolbar {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+body.dark-mode .filter-toolbar,
+.dark-mode .filter-toolbar {
+    background: #1e293b !important;
+    border-color: #334155 !important;
 }
 .stat-number-online {
     font-size: 20px;
@@ -138,7 +181,7 @@ table th {
             </a>
             {/if}
             <h3 class="data-usage-header-title" style="margin: 0; font-size: 20px; font-weight: 700; color: #1e293b; cursor: pointer;" title="Data Usage Engine">
-                <i class="fa fa-dashboard text-primary"></i> Dashboard {if $filterRouter > 0}&mdash; {$currentRouter->name}{/if}
+                <i class="fa fa-dashboard text-primary"></i> Dashboard {if $filterRouter > 0}- {$currentRouter->name}{/if}
             </h3>
         </div>
         <div class="btn-group" style="display: flex; align-items: center; gap: 4px;">
@@ -147,6 +190,9 @@ table th {
             </a>
             <a class="btn btn-warning btn-xs" href="{$_url}plugin/data_usage_scripts">
                 <i class="fa fa-cogs"></i> Settings
+            </a>
+            <a class="btn btn-info btn-xs" href="{$_url}plugin/data_usage_logs">
+                <i class="fa fa-list-alt"></i> Logs
             </a>
             <form id="syncAllForm" method="POST" action="{$_url}plugin/data_usage_sync" style="display: inline-block; margin: 0;">
                 <input type="hidden" name="csrf_token" value="{$csrf_token}">
@@ -177,7 +223,7 @@ table th {
     <div class="col-md-3 col-sm-6 col-xs-12">
         <a href="{$_url}plugin/data_usage_admin&router={$rc['id']}" id="router_card_{$rc['id']}" class="router-card router-card-loading {if !$rc['online']}router-card-offline{/if}" data-router-id="{$rc['id']}">
             <!-- Router Name (Centered) -->
-            <h4 id="rc_name_{$rc['id']}" style="margin: 0 0 6px 0; font-size: 15px; font-weight: 700; color: {if $rc['online']}#1e293b{else}#991b1b{/if}; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            <h4 id="rc_name_{$rc['id']}" class="rc-title" style="margin: 0 0 6px 0; font-size: 15px; font-weight: 700; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: {if $rc['online']}inherit{else}#dc2626{/if};">
                 {$rc['name']}
             </h4>
 
@@ -215,7 +261,7 @@ table th {
 
 {if !$routerIsOnline}
 <div class="alert alert-warning" style="border-radius: 8px; margin-bottom: 16px;">
-    <i class="fa fa-exclamation-triangle"></i> <strong>Router is currently offline / unreachable.</strong> Displaying cached user registry and last recorded session history.
+    <strong>Router is offline.</strong> Showing last saved user history.
 </div>
 {/if}
 
@@ -223,12 +269,12 @@ table th {
     <div class="col-sm-12">
         <div class="panel panel-hovered mb20 panel-primary">
             <div class="panel-heading" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                <h4 style="margin: 0; font-size: 14px; font-weight: bold; color: #fff;">
-                    <i class="fa fa-users"></i> Users &amp; Sessions &mdash; {$currentRouter->name}
+                <h4 style="margin: 0; font-size: 14px; font-weight: bold;">
+                    Connected Users &amp; History - {$currentRouter->name}
                 </h4>
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span class="label {if $routerIsOnline}label-success{else}label-danger{/if}" style="font-size: 11px;">
-                        {if $routerIsOnline}<i class="fa fa-check-circle"></i> Router Online{else}<i class="fa fa-times-circle"></i> Router Offline{/if}
+                        {if $routerIsOnline}Router Online{else}Router Offline{/if}
                     </span>
                     <button class="btn btn-xs btn-default" onclick="location.reload();" style="font-weight: 600;">
                         <i class="fa fa-refresh"></i> Refresh All
@@ -238,7 +284,7 @@ table th {
 
             <div class="panel-body" style="padding: 15px;">
                 <!-- Quick Filter Toolbar -->
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; background: #f8fafc; padding: 10px 14px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                <div class="filter-toolbar" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; padding: 10px 14px; border-radius: 8px;">
                     <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
                         <!-- Service Filter -->
                         <div style="display: flex; align-items: center; gap: 6px;">
@@ -272,8 +318,8 @@ table th {
                                 <th>Status</th>
                                 <th>Uptime</th>
                                 <th>Last Seen</th>
-                                <th>Live Upload</th>
-                                <th>Live Download</th>
+                                <th>Upload</th>
+                                <th>Download</th>
                                 <th>Total Usage</th>
                                 <th style="width: 140px; text-align: center;">Action</th>
                             </tr>
@@ -482,8 +528,8 @@ function initDeveloperPopups() {
                   '</ul>' +
                   '<div style="text-align:center; padding-top:6px; border-top:1px dashed #cbd5e1;">' +
                   '<p style="font-size:11px; color:#64748b; margin-bottom:8px;">Developed by <b>Mahmud</b></p>' +
-                  '<a href="https://wa.me/+8801540221898?text=I%20want%20to%20help%20you%20buy%20a%20meal" target="_blank" class="btn btn-sm btn-success" style="border-radius:20px; padding:6px 18px; font-weight:600;">' +
-                  '<i class="fa fa-whatsapp"></i> Donate / Buy a Meal ☕' +
+                  '<a href="https://wa.me/+8801540221898?text=Support" target="_blank" class="btn btn-sm btn-success" style="border-radius:20px; padding:6px 18px; font-weight:600;">' +
+                  '<i class="fa fa-whatsapp"></i> Support' +
                   '</a>' +
                   '</div>' +
                   '</div>',
@@ -503,11 +549,10 @@ function initDeveloperPopups() {
         Swal.fire({
             title: 'Advance Data Usage',
             html: '<div style="text-align:center; padding:10px;">' +
-                  '<i class="fa fa-code fa-2x" style="color:#3c8dbc; margin-bottom:10px;"></i>' +
                   '<p style="font-size:14px; margin-bottom:4px;">Developed by <b>Mahmud</b></p>' +
                   '<p style="font-size:12px; color:#64748b; margin-bottom:16px;">Commercial Edition for SysTik</p>' +
-                  '<a href="https://wa.me/+8801540221898?text=I%20want%20to%20help%20you%20buy%20a%20meal" target="_blank" class="btn btn-success btn-sm" style="border-radius:20px; padding:6px 16px;">' +
-                  '<i class="fa fa-whatsapp"></i> Donate / Buy a Meal ☕' +
+                  '<a href="https://wa.me/+8801540221898?text=Support" target="_blank" class="btn btn-success btn-sm" style="border-radius:20px; padding:6px 16px;">' +
+                  '<i class="fa fa-whatsapp"></i> Support' +
                   '</a>' +
                   '</div>',
             showConfirmButton: true,
@@ -554,16 +599,16 @@ $(document).ready(function() {
                         var data = res.routers[rId];
                         if (data.online) {
                             $card.removeClass('router-card-offline');
-                            $name.css('color', '#1e293b');
+                            $name.css('color', '');
                             $count.removeClass('stat-number-offline').addClass('stat-number-online').text(data.online_count);
                             $label.removeClass('stat-label-offline').addClass('stat-label').text('Online');
-                            $sync.css('color', '#94a3b8').text('Last Sync: ' + data.last_sync);
+                            $sync.css('color', '').text('Last Sync: ' + data.last_sync);
                         } else {
                             $card.addClass('router-card-offline');
-                            $name.css('color', '#991b1b');
+                            $name.css('color', '#ef4444');
                             $count.removeClass('stat-number-online').addClass('stat-number-offline').text('Offline');
                             $label.removeClass('stat-label').addClass('stat-label-offline').text('Unreachable');
-                            $sync.css('color', '#f87171').text('Last Sync: ' + data.last_sync);
+                            $sync.css('color', '#ef4444').text('Last Sync: ' + data.last_sync);
                         }
                     }
                 },

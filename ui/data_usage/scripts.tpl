@@ -4,6 +4,7 @@
 table th {
     text-transform: none !important;
     font-weight: 600 !important;
+    white-space: nowrap !important;
 }
 .profile-table td, .profile-table th {
     vertical-align: middle !important;
@@ -15,10 +16,10 @@ table th {
     <div class="col-sm-12" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <div style="display: flex; align-items: center; gap: 12px;">
             <a href="javascript:history.back()" class="btn btn-sm btn-default" style="font-weight: 600; border-radius: 6px;">
-                Back
+                <i class="fa fa-arrow-left"></i> Back
             </a>
             <h3 style="margin: 0; font-size: 20px; font-weight: 700; color: #1e293b;">
-                Settings &amp; MikroTik Setup
+                Settings
             </h3>
         </div>
         <div class="btn-group">
@@ -28,18 +29,51 @@ table th {
             <a class="btn btn-warning btn-xs active" href="{$_url}plugin/data_usage_scripts">
                 <i class="fa fa-cogs"></i> Settings
             </a>
+            <a class="btn btn-info btn-xs" href="{$_url}plugin/data_usage_logs">
+                <i class="fa fa-list-alt"></i> Logs
+            </a>
         </div>
     </div>
 </div>
 
-<!-- 1. Router & General Configuration Panel -->
+<!-- 1. Server Cron Command Panel -->
 <div class="row">
     <div class="col-sm-12">
         <div class="panel panel-primary" style="border-radius: 6px; margin-bottom: 18px;">
             <div class="panel-heading" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                <span style="font-weight: 700;">Router &amp; Poller Configuration</span>
+                <span style="font-weight: 700;">Cron Command</span>
+                <span style="font-size: 11px;">
+                    {if !empty($cronInfo['last_run'])}
+                        <span class="label {if $cronInfo['status'] == 'active'}label-success{else}label-warning{/if}" style="font-size: 11px;">
+                            Last cron run: {$cronInfo['last_run']} {if $cronInfo['ago']}({$cronInfo['ago']}){/if}
+                        </span>
+                    {else}
+                        <span class="label label-danger" style="font-size: 11px;">Cron setup needed</span>
+                    {/if}
+                </span>
+            </div>
+            <div class="panel-body" style="padding: 16px;">
+                <div class="input-group">
+                    <input type="text" id="txtCronCmd" class="form-control input-sm" value="*/5 * * * * php /var/www/html/demo/system/plugin/ui/data_usage/cron_sync.php >/dev/null 2>&1" readonly style="font-family: monospace; font-size: 11px;">
+                    <span class="input-group-btn">
+                        <button class="btn btn-default btn-sm" type="button" onclick="copyText('txtCronCmd')">
+                            Copy
+                        </button>
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 2. Router & General Configuration Panel -->
+<div class="row">
+    <div class="col-sm-12">
+        <div class="panel panel-primary" style="border-radius: 6px; margin-bottom: 18px;">
+            <div class="panel-heading" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <span style="font-weight: 700;">Router Setup</span>
                 <span class="label {if $routerOnline}label-success{else}label-danger{/if}" style="font-size: 11px;">
-                    {if $routerOnline}Connected to Router{else}Router Unreachable{/if}
+                    {if $routerOnline}Connected{else}Offline{/if}
                 </span>
             </div>
             <div class="panel-body" style="padding: 16px;">
@@ -75,7 +109,7 @@ table th {
                             <input type="hidden" name="csrf_token" value="{$csrf_token}">
                             <input type="hidden" name="save_traffic_settings" value="1">
                             <div class="form-group" style="margin-bottom: 0;">
-                                <label style="font-weight: 600; font-size: 12px; margin-bottom: 4px;">Traffic Polling Interval:</label>
+                                <label style="font-weight: 600; font-size: 12px; margin-bottom: 4px;">Interval:</label>
                                 <div class="input-group">
                                     <input type="number" name="traffic_poll_ms" class="form-control input-sm" value="{$trafficPollMs|default:100}" min="30" max="5000" step="10" required>
                                     <span class="input-group-addon" style="font-size: 11px; padding: 4px 8px;">ms</span>
@@ -92,50 +126,17 @@ table th {
 
                 <hr style="margin: 12px 0 16px 0; border-color: #e2e8f0;">
 
-                <!-- Poller & Crontab Row -->
+                <!-- Poller Action Row -->
                 <div class="row">
-                    <!-- Poller Action -->
-                    <div class="col-md-5" style="margin-bottom: 10px;">
-                        <label style="font-weight: 600; font-size: 12px; margin-bottom: 4px; display: block;">
-                            MikroTik Live Poller Script:
-                        </label>
+                    <div class="col-sm-12" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
                         <div class="btn-group">
                             <form method="POST" action="{$_url}plugin/data_usage_install_poller" style="display: inline-block; margin-right: 4px;">
                                 <input type="hidden" name="csrf_token" value="{$csrf_token}">
                                 <input type="hidden" name="router_id" value="{$selectedRouterId}">
                                 <button type="submit" class="btn btn-sm btn-success" style="font-weight: 600;">
-                                    Auto-Install on Target
+                                    Install on Target
                                 </button>
                             </form>
-                            <a href="{$_url}plugin/data_usage_install_poller&router_id=0" class="btn btn-sm btn-primary" onclick="return confirm('Install / update poller script on all enabled routers?')" style="font-weight: 600;">
-                                Install on All
-                            </a>
-                        </div>
-                    </div>
-
-                    <!-- Server Crontab -->
-                    <div class="col-md-7">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                            <label style="font-weight: 600; font-size: 12px; margin-bottom: 0;">
-                                Server Cron Command:
-                            </label>
-                            <span style="font-size: 11px;">
-                                {if $cronInfo['status'] == 'active'}
-                                    <span class="text-success" style="font-weight: 600;">Active: {$cronInfo['ago']}</span>
-                                {elseif $cronInfo['status'] == 'delayed'}
-                                    <span class="text-warning" style="font-weight: 600;">Last: {$cronInfo['ago']}</span>
-                                {else}
-                                    <span class="text-danger" style="font-weight: 600;">Cron setup needed</span>
-                                {/if}
-                            </span>
-                        </div>
-                        <div class="input-group">
-                            <input type="text" id="txtCronCmd" class="form-control input-sm" value="*/5 * * * * php /var/www/html/demo/system/plugin/ui/data_usage/cron_sync.php >/dev/null 2>&1" readonly style="font-family: monospace; font-size: 11px; background: #ffffff; color: #1e293b;">
-                            <span class="input-group-btn">
-                                <button class="btn btn-default btn-sm" type="button" onclick="copyText('txtCronCmd')">
-                                    Copy
-                                </button>
-                            </span>
                         </div>
                     </div>
                 </div>
@@ -149,12 +150,12 @@ table th {
     <div class="col-sm-12">
         <div class="panel panel-default" style="border-radius: 6px; margin-bottom: 18px; border: 1px solid #e2e8f0;">
             <div class="panel-heading" style="background: #ffffff; border-bottom: 1px solid #e2e8f0; padding: 12px 16px;">
-                <strong style="color: #1e293b; font-size: 14px;">Profile Automation (PPPoE &amp; Hotspot Webhooks)</strong>
+                <strong style="color: #1e293b; font-size: 14px;">Automatic Profile Setup</strong>
             </div>
             <div class="panel-body" style="padding: 16px;">
                 {if !$routerOnline}
                 <div class="alert alert-warning" style="margin-bottom: 0; border-radius: 6px;">
-                    Target router is offline. Please ensure the router is connected to manage profile webhooks.
+                    Router offline. Connect router to manage profiles.
                 </div>
                 {else}
                 <form method="POST" action="{$_url}plugin/data_usage_manage_profile_scripts" id="profileScriptsForm">
@@ -165,20 +166,18 @@ table th {
                     <div class="row">
                         <!-- PPPoE Profiles Table -->
                         <div class="col-md-6" style="margin-bottom: 14px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <div style="margin-bottom: 8px;">
                                 <h5 style="margin: 0; font-weight: 700; color: #1e293b;">
                                     PPPoE Profiles ({count($pppProfiles)})
                                 </h5>
-                                <div class="btn-group btn-group-xs">
-                                    <button type="button" class="btn btn-default btn-xs" onclick="toggleCheckboxes('chk_ppp_', true)">Select All</button>
-                                    <button type="button" class="btn btn-default btn-xs" onclick="toggleCheckboxes('chk_ppp_', false)">None</button>
-                                </div>
                             </div>
                             <div class="table-responsive" style="max-height: 220px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 4px;">
                                 <table class="table table-striped table-hover profile-table" style="margin-bottom: 0;">
                                     <thead>
                                         <tr style="background: #f8fafc;">
-                                            <th style="width: 40px; text-align: center;">#</th>
+                                            <th style="width: 40px; text-align: center;">
+                                                <input type="checkbox" id="checkAllPpp" onchange="toggleCheckboxes('chk_ppp_', this.checked, 'checkAllPpp')" title="Select All">
+                                            </th>
                                             <th>Profile Name</th>
                                             <th style="width: 110px; text-align: center;">Script Status</th>
                                         </tr>
@@ -190,7 +189,7 @@ table th {
                                         {foreach $pppProfiles as $idx => $p}
                                         <tr>
                                             <td style="text-align: center;">
-                                                <input type="checkbox" name="ppp_profiles[]" value="{$p['name']}" class="chk_ppp_" id="ppp_p_{$idx}">
+                                                <input type="checkbox" name="ppp_profiles[]" value="{$p['name']}" class="chk_ppp_" id="ppp_p_{$idx}" onchange="syncMasterCheckbox('chk_ppp_', 'checkAllPpp')">
                                             </td>
                                             <td>
                                                 <label for="ppp_p_{$idx}" style="cursor: pointer; margin-bottom: 0; font-weight: 600;">{$p['name']}</label>
@@ -212,20 +211,18 @@ table th {
 
                         <!-- Hotspot User Profiles Table -->
                         <div class="col-md-6" style="margin-bottom: 14px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <div style="margin-bottom: 8px;">
                                 <h5 style="margin: 0; font-weight: 700; color: #1e293b;">
                                     Hotspot Profiles ({count($hsProfiles)})
                                 </h5>
-                                <div class="btn-group btn-group-xs">
-                                    <button type="button" class="btn btn-default btn-xs" onclick="toggleCheckboxes('chk_hs_', true)">Select All</button>
-                                    <button type="button" class="btn btn-default btn-xs" onclick="toggleCheckboxes('chk_hs_', false)">None</button>
-                                </div>
                             </div>
                             <div class="table-responsive" style="max-height: 220px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 4px;">
                                 <table class="table table-striped table-hover profile-table" style="margin-bottom: 0;">
                                     <thead>
                                         <tr style="background: #f8fafc;">
-                                            <th style="width: 40px; text-align: center;">#</th>
+                                            <th style="width: 40px; text-align: center;">
+                                                <input type="checkbox" id="checkAllHs" onchange="toggleCheckboxes('chk_hs_', this.checked, 'checkAllHs')" title="Select All">
+                                            </th>
                                             <th>Profile Name</th>
                                             <th style="width: 110px; text-align: center;">Script Status</th>
                                         </tr>
@@ -237,7 +234,7 @@ table th {
                                         {foreach $hsProfiles as $idx => $h}
                                         <tr>
                                             <td style="text-align: center;">
-                                                <input type="checkbox" name="hs_profiles[]" value="{$h['name']}" class="chk_hs_" id="hs_p_{$idx}">
+                                                <input type="checkbox" name="hs_profiles[]" value="{$h['name']}" class="chk_hs_" id="hs_p_{$idx}" onchange="syncMasterCheckbox('chk_hs_', 'checkAllHs')">
                                             </td>
                                             <td>
                                                 <label for="hs_p_{$idx}" style="cursor: pointer; margin-bottom: 0; font-weight: 600;">{$h['name']}</label>
@@ -279,7 +276,7 @@ table th {
     <div class="col-sm-12">
         <div class="panel panel-default" style="border-radius: 6px; margin-bottom: 20px; border: 1px solid #e2e8f0;">
             <div class="panel-heading" style="cursor: pointer; background: #ffffff;" data-toggle="collapse" data-target="#manualScriptsCollapse">
-                <strong style="color: #64748b; font-size: 13px;">View Manual Script Code (Optional) &darr;</strong>
+                <strong style="color: #64748b; font-size: 13px;">Manual Scripts (Optional)</strong>
             </div>
             <div id="manualScriptsCollapse" class="panel-collapse collapse">
                 <div class="panel-body" style="padding: 16px;">
@@ -327,11 +324,25 @@ table th {
 </div>
 
 <script>
-function toggleCheckboxes(className, state) {
+function toggleCheckboxes(className, state, masterId) {
     var boxes = document.querySelectorAll('.' + className);
     boxes.forEach(function(b) {
         b.checked = state;
     });
+    var master = document.getElementById(masterId);
+    if (master) {
+        master.indeterminate = false;
+    }
+}
+
+function syncMasterCheckbox(className, masterId) {
+    var boxes = document.querySelectorAll('.' + className);
+    var checked = document.querySelectorAll('.' + className + ':checked');
+    var master = document.getElementById(masterId);
+    if (master && boxes.length > 0) {
+        master.checked = (boxes.length === checked.length);
+        master.indeterminate = (checked.length > 0 && checked.length < boxes.length);
+    }
 }
 
 function submitProfiles(action) {
