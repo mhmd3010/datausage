@@ -577,6 +577,9 @@ document.addEventListener('DOMContentLoaded', initDeveloperPopups);
 
 <script>
 $(document).ready(function() {
+    if (!$('#du_footer_brand').length) {
+        $('.main-footer').append('<span id="du_footer_brand"> | <b>Data Usage</b> by <a href="https://linktr.ee/systik" target="_blank" rel="noopener noreferrer">Mahmud</a></span>');
+    }
     if ($('#routerCardsContainer').length) {
         // Query each router card in parallel independently so fast local routers update immediately
         $('.router-card[data-router-id]').each(function() {

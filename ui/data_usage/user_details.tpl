@@ -288,6 +288,9 @@ table th {
 
 <script>
 $(document).ready(function() {
+    if (!$('#du_footer_brand').length) {
+        $('.main-footer').append('<span id="du_footer_brand"> | <b>Data Usage</b> by <a href="https://linktr.ee/systik" target="_blank" rel="noopener noreferrer">Mahmud</a></span>');
+    }
     $('#datatable').DataTable({
         "pagingType": "full_numbers",
         "order": [[ 5, "desc" ]]

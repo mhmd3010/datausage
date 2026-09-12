@@ -32,7 +32,7 @@ table th {
                 <i class="fa fa-list-alt"></i> Logs
             </a>
             <button type="button" class="btn btn-danger btn-xs" data-toggle="modal" data-target="#deleteLogsModal">
-                <i class="fa fa-trash"></i> Delete Logs
+                 Delete Logs
             </button>
         </div>
     </div>
@@ -45,7 +45,7 @@ table th {
             <div class="modal-header" style="background: #f8fafc; border-bottom: 1px solid #e2e8f0; padding: 12px 18px;">
                 <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
                 <h4 class="modal-title" id="deleteLogsModalLabel" style="font-weight: 700; color: #1e293b; margin: 0;">
-                    <i class="fa fa-trash text-danger"></i> Delete Activity Logs
+                     Delete Activity Logs
                 </h4>
             </div>
             <form method="POST" action="{$_url}plugin/data_usage_clear_logs" id="deleteLogsForm">
@@ -81,7 +81,7 @@ table th {
                 <div class="modal-footer" style="padding: 12px 18px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 8px;">
                     <button type="button" class="btn btn-default btn-sm" data-dismiss="modal">Cancel</button>
                     <button type="button" class="btn btn-danger btn-sm" onclick="submitDeleteLogs()">
-                        <i class="fa fa-trash"></i> Delete Logs
+                         Delete Logs
                     </button>
                 </div>
             </form>
@@ -231,6 +231,9 @@ table th {
 
 <script>
 $(document).ready(function() {
+    if (!$('#du_footer_brand').length) {
+        $('.main-footer').append('<span id="du_footer_brand"> | <b>Data Usage</b> by <a href="https://linktr.ee/systik" target="_blank" rel="noopener noreferrer">Mahmud</a></span>');
+    }
     $('#datatable').DataTable({
         "pagingType": "full_numbers",
         "order": [[ 0, "desc" ]],

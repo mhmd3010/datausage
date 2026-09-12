@@ -53,7 +53,8 @@ table th {
                 </span>
             </div>
             <div class="panel-body" style="padding: 16px;">
-                <div class="input-group">
+                <label style="font-weight: 600; font-size: 12px; margin-bottom: 4px;">System Crontab Command:</label>
+                <div class="input-group" style="margin-bottom: 12px;">
                     <input type="text" id="txtCronCmd" class="form-control input-sm" value="*/5 * * * * php /var/www/html/demo/system/plugin/ui/data_usage/cron_sync.php >/dev/null 2>&1" readonly style="font-family: monospace; font-size: 11px;">
                     <span class="input-group-btn">
                         <button class="btn btn-default btn-sm" type="button" onclick="copyText('txtCronCmd')">
@@ -61,6 +62,18 @@ table th {
                         </button>
                     </span>
                 </div>
+
+                <form method="POST" action="{$_url}plugin/data_usage_scripts" class="form-inline" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <input type="hidden" name="csrf_token" value="{$csrf_token}">
+                    <input type="hidden" name="save_traffic_settings" value="1">
+                    <label style="font-weight: 600; font-size: 12px; margin-bottom: 0;">Auto-Prune Activity Logs:</label>
+                    <div class="input-group" style="width: 140px;">
+                        <input type="number" name="log_retention_days" class="form-control input-sm" value="{$logRetentionDays|default:30}" min="0" max="365" required>
+                        <span class="input-group-addon" style="font-size: 11px;">days</span>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm" style="font-weight: 600;">Save</button>
+                    <span class="text-muted" style="font-size: 11px;">(Keeps logs from last X days; set to 0 to disable)</span>
+                </form>
             </div>
         </div>
     </div>
@@ -324,6 +337,12 @@ table th {
 </div>
 
 <script>
+$(document).ready(function() {
+    if (!$('#du_footer_brand').length) {
+        $('.main-footer').append('<span id="du_footer_brand"> | <b>Data Usage</b> by <a href="https://linktr.ee/systik" target="_blank" rel="noopener noreferrer">Mahmud</a></span>');
+    }
+});
+
 function toggleCheckboxes(className, state, masterId) {
     var boxes = document.querySelectorAll('.' + className);
     boxes.forEach(function(b) {

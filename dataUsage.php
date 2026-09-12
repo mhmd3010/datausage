@@ -1657,9 +1657,15 @@ function data_usage_scripts()
         if (!Csrf::check($csrf_token)) {
             r2(getUrl('plugin/data_usage_scripts'), 'e', 'Security token expired. Please try again.');
         }
-        $pollMs = max(30, min(5000, (int)($_POST['traffic_poll_ms'] ?? 100)));
-        data_usage_set_config('data_usage_traffic_poll_ms', (string)$pollMs);
-        r2(getUrl('plugin/data_usage_scripts'), 's', 'Traffic monitor polling interval updated to ' . $pollMs . ' ms.');
+        if (isset($_POST['traffic_poll_ms'])) {
+            $pollMs = max(30, min(5000, (int)$_POST['traffic_poll_ms']));
+            data_usage_set_config('data_usage_traffic_poll_ms', (string)$pollMs);
+        }
+        if (isset($_POST['log_retention_days'])) {
+            $retention = max(0, min(365, (int)$_POST['log_retention_days']));
+            data_usage_set_config('data_usage_log_retention_days', (string)$retention);
+        }
+        r2(getUrl('plugin/data_usage_scripts'), 's', 'Settings updated successfully.');
     }
 
     $ui->assign('_system_menu', 'plugin/data_usage_admin');
@@ -1730,6 +1736,7 @@ function data_usage_scripts()
     $ui->assign('webhookUrl', $webhookUrl);
     $ui->assign('appUrl', $appUrl);
     $ui->assign('trafficPollMs', (int)data_usage_get_config('data_usage_traffic_poll_ms', '100'));
+    $ui->assign('logRetentionDays', (int)data_usage_get_config('data_usage_log_retention_days', '30'));
     $ui->assign('cronInfo', data_usage_get_cron_info());
     $ui->assign('csrf_token', Csrf::generateAndStoreToken());
 
@@ -2608,6 +2615,17 @@ function data_usage_sync_router_users($routerId = 0)
 }
 
 /**
+ * Auto-prune event logs older than configured retention days
+ */
+function data_usage_auto_prune_logs()
+{
+    $retention = (int)data_usage_get_config('data_usage_log_retention_days', '30');
+    if ($retention > 0) {
+        ORM::raw_execute("DELETE FROM tbl_data_usage_logs WHERE log_time < DATE_SUB(NOW(), INTERVAL " . (int)$retention . " DAY)");
+    }
+}
+
+/**
  * 5. On-Demand / Cron Failsafe RouterOS API Sync
  */
 function data_usage_sync()
@@ -2616,6 +2634,9 @@ function data_usage_sync()
         _admin();
     }
     data_usage_init_db();
+
+    // Auto-prune event logs according to retention days
+    data_usage_auto_prune_logs();
 
     $routerId = isset($_POST['router_id']) ? (int)$_POST['router_id'] : (isset($_GET['router_id']) ? (int)$_GET['router_id'] : 0);
 
