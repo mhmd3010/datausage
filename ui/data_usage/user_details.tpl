@@ -288,9 +288,6 @@ table th {
 
 <script>
 $(document).ready(function() {
-    if (!$('#du_footer_brand').length) {
-        $('.main-footer').append('<span id="du_footer_brand"> | <b>Data Usage</b> by <a href="https://linktr.ee/systik" target="_blank" rel="noopener noreferrer">Mahmud</a></span>');
-    }
     $('#datatable').DataTable({
         "pagingType": "full_numbers",
         "order": [[ 5, "desc" ]]
@@ -670,33 +667,4 @@ function formatBpsJs(bps) {
     if (bps >= 1000) return (bps / 1000).toFixed(2) + ' Kbps';
     return Math.round(bps) + ' bps';
 }
-
-// ── Developer Popups & Easter Egg ──
-function initDeveloperPopups() {
-    var triggerEgg = function() {
-        Swal.fire({
-            title: 'Data Usage & Tracker',
-            html: '<div style="text-align:center; padding:10px;">' +
-                  '<i class="fa fa-code fa-2x" style="color:#3c8dbc; margin-bottom:10px;"></i>' +
-                  '<p style="font-size:14px; margin-bottom:4px;">Developed by <b>Mahmud</b></p>' +
-                  '<p style="font-size:12px; color:#64748b; margin-bottom:16px;">Commercial Edition for SysTik</p>' +
-                  '<a href="https://wa.me/+8801540221898?text=Support" target="_blank" class="btn btn-success btn-sm" style="border-radius:20px; padding:6px 16px;">' +
-                  '<i class="fa fa-whatsapp"></i> Support' +
-                  '</a>' +
-                  '</div>',
-            showConfirmButton: true,
-            confirmButtonText: 'Close'
-        });
-    };
-
-    var titles = document.querySelectorAll('.data-usage-header-title, h3');
-    titles.forEach(function(el) {
-        if (el.innerText.toLowerCase().indexOf('user') !== -1 || el.innerText.toLowerCase().indexOf('data usage') !== -1) {
-            el.style.cursor = 'pointer';
-            el.title = "Developer Info";
-            el.addEventListener('click', triggerEgg);
-        }
-    });
-}
-document.addEventListener('DOMContentLoaded', initDeveloperPopups);
 </script>

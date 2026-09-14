@@ -344,12 +344,6 @@ table th {
 </div>
 
 <script>
-$(document).ready(function() {
-    if (!$('#du_footer_brand').length) {
-        $('.main-footer').append('<span id="du_footer_brand"> | <b>Data Usage</b> by <a href="https://linktr.ee/systik" target="_blank" rel="noopener noreferrer">Mahmud</a></span>');
-    }
-});
-
 function toggleCheckboxes(className, state, masterId) {
     var boxes = document.querySelectorAll('.' + className);
     boxes.forEach(function(b) {

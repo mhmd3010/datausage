@@ -270,7 +270,7 @@ body.dark-mode .filter-toolbar,
         <div class="panel panel-hovered mb20 panel-primary">
             <div class="panel-heading" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                 <h4 style="margin: 0; font-size: 14px; font-weight: bold;">
-                    Connected Users &amp; History - {$currentRouter->name}
+                    Users and Sessions - {$currentRouter->name}
                 </h4>
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span class="label {if $routerIsOnline}label-success{else}label-danger{/if}" style="font-size: 11px;">
@@ -513,73 +513,12 @@ function refreshRow(username, routerId, service, btn) {
     });
 }
 
-// ── Developer Popups & Easter Egg ──
-function initDeveloperPopups() {
-    if (!sessionStorage.getItem('dataUsageDevModalShown')) {
-        sessionStorage.setItem('dataUsageDevModalShown', 'true');
-        Swal.fire({
-            title: 'Advance Data Usage',
-            html: '<div style="text-align:left; font-size:13px; color:#475569; margin-bottom:10px; background:#f8fafc; padding:12px 14px; border-radius:8px; border:1px solid #e2e8f0;">' +
-                  '<p style="margin-bottom:6px; color:#0f172a; font-weight:700;"><i class="fa fa-check-circle text-success"></i> Key Features:</p>' +
-                  '<ul style="padding-left:18px; margin-bottom:12px; line-height:1.5;">' +
-                  '<li><b>Direct RouterOS API:</b> Real-time active user tracking without polling delay</li>' +
-                  '<li><b>Hardware Accounting:</b> Strict on-up/on-down sync with interface timestamps</li>' +
-                  '<li><b>Multi-Router Live Monitor:</b> Instant reachability & connected counts</li>' +
-                  '</ul>' +
-                  '<div style="text-align:center; padding-top:6px; border-top:1px dashed #cbd5e1;">' +
-                  '<p style="font-size:11px; color:#64748b; margin-bottom:8px;">Developed by <b>Mahmud</b></p>' +
-                  '<a href="https://wa.me/+8801540221898?text=Support" target="_blank" class="btn btn-sm btn-success" style="border-radius:20px; padding:6px 18px; font-weight:600;">' +
-                  '<i class="fa fa-whatsapp"></i> Support' +
-                  '</a>' +
-                  '</div>' +
-                  '</div>',
-            showConfirmButton: false,
-            timer: 5000,
-            timerProgressBar: true,
-            allowOutsideClick: true,
-            backdrop: 'rgba(0,0,0,0.6)',
-            didOpen: function(popup) {
-                popup.addEventListener('mouseenter', Swal.stopTimer);
-                popup.addEventListener('mouseleave', Swal.resumeTimer);
-            }
-        });
-    }
-
-    var triggerEgg = function() {
-        Swal.fire({
-            title: 'Advance Data Usage',
-            html: '<div style="text-align:center; padding:10px;">' +
-                  '<p style="font-size:14px; margin-bottom:4px;">Developed by <b>Mahmud</b></p>' +
-                  '<p style="font-size:12px; color:#64748b; margin-bottom:16px;">Commercial Edition for SysTik</p>' +
-                  '<a href="https://wa.me/+8801540221898?text=Support" target="_blank" class="btn btn-success btn-sm" style="border-radius:20px; padding:6px 16px;">' +
-                  '<i class="fa fa-whatsapp"></i> Support' +
-                  '</a>' +
-                  '</div>',
-            showConfirmButton: true,
-            confirmButtonText: 'Close'
-        });
-    };
-
-    var titles = document.querySelectorAll('.data-usage-header-title, h3');
-    titles.forEach(function(el) {
-        if (el.innerText.toLowerCase().indexOf('dashboard') !== -1 || el.innerText.toLowerCase().indexOf('data usage') !== -1) {
-            el.style.cursor = 'pointer';
-            el.title = "Developer Info";
-            el.addEventListener('click', triggerEgg);
-        }
-    });
-}
-
-document.addEventListener('DOMContentLoaded', initDeveloperPopups);
 </script>
 
 {include file="sections/footer.tpl"}
 
 <script>
 $(document).ready(function() {
-    if (!$('#du_footer_brand').length) {
-        $('.main-footer').append('<span id="du_footer_brand"> | <b>Data Usage</b> by <a href="https://linktr.ee/systik" target="_blank" rel="noopener noreferrer">Mahmud</a></span>');
-    }
     if ($('#routerCardsContainer').length) {
         // Query each router card in parallel independently so fast local routers update immediately
         $('.router-card[data-router-id]').each(function() {

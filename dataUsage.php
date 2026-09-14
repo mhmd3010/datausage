@@ -1117,6 +1117,107 @@ function data_usage_get_direct_live_sessions($router)
 }
 
 /**
+ * Developer Branding & Modal Script Generator
+ */
+function data_usage_get_dev_script()
+{
+    $ltSvg = '<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" style="vertical-align: -2px; margin-right: 4px;"><path d="m13.73635 5.85251 4.00467-4.11665 2.3248 2.3808-4.20064 4.00466h5.9085v3.30473h-5.9365l4.22865 4.10766-2.3248 2.3338L12.0005 12.099l-5.74052 5.76852-2.3248-2.3248 4.22864-4.10766h-5.9375V8.12132h5.9085L3.93417 4.11666l2.3248-2.3808 4.00468 4.11665V0h3.4727zm-3.4727 10.30614h3.4727V24h-3.4727z"/></svg>';
+    $jsonSvg = json_encode($ltSvg);
+
+    return '<script>' . "\n"
+        . '(function() {' . "\n"
+        . '    var ltSvg = ' . $jsonSvg . ';' . "\n"
+        . '    function injectFooterBrand() {' . "\n"
+        . '        var footer = document.querySelector(".main-footer");' . "\n"
+        . '        if (footer && !document.getElementById("du_footer_brand")) {' . "\n"
+        . '            var span = document.createElement("span");' . "\n"
+        . '            span.id = "du_footer_brand";' . "\n"
+        . '            span.innerHTML = \' | <b>Data Usage</b> by <a href="https://linktr.ee/systik" target="_blank" rel="noopener noreferrer">Mahmud</a>\';' . "\n"
+        . '            footer.appendChild(span);' . "\n"
+        . '        }' . "\n"
+        . '    }' . "\n"
+        . '    function initDevPopups() {' . "\n"
+        . '        if (typeof Swal === "undefined") return;' . "\n"
+        . '        if (!sessionStorage.getItem("dataUsageDevModalShown")) {' . "\n"
+        . '            sessionStorage.setItem("dataUsageDevModalShown", "true");' . "\n"
+        . '            Swal.fire({' . "\n"
+        . '                title: "Advance Data Usage",' . "\n"
+        . '                html: \'<div style="text-align:left; font-size:13px; color:#475569; margin-bottom:10px; background:#f8fafc; padding:12px 14px; border-radius:8px; border:1px solid #e2e8f0;">\' +' . "\n"
+        . '                      \'<p style="margin-bottom:6px; color:#0f172a; font-weight:700;"><i class="fa fa-check-circle text-success"></i> Key Features:</p>\' +' . "\n"
+        . '                      \'<ul style="padding-left:18px; margin-bottom:12px; line-height:1.5;">\' +' . "\n"
+        . '                      \'<li><b>Direct RouterOS API:</b> Real-time active user tracking without polling delay</li>\' +' . "\n"
+        . '                      \'<li><b>Hardware Accounting:</b> Strict on-up/on-down sync with interface timestamps</li>\' +' . "\n"
+        . '                      \'<li><b>Multi-Router Live Monitor:</b> Instant reachability & connected counts</li>\' +' . "\n"
+        . '                      \'</ul>\' +' . "\n"
+        . '                      \'<div style="text-align:center; padding-top:6px; border-top:1px dashed #cbd5e1;">\' +' . "\n"
+        . '                      \'<p style="font-size:11px; color:#64748b; margin-bottom:8px;">Developed by <b>Mahmud</b></p>\' +' . "\n"
+        . '                      \'<a href="https://linktr.ee/systik" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-success" style="border-radius:20px; padding:6px 18px; font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:6px;">\' +' . "\n"
+        . '                      ltSvg + \' Linktree\' +' . "\n"
+        . '                      \'</a>\' +' . "\n"
+        . '                      \'</div>\' +' . "\n"
+        . '                      \'</div>\',' . "\n"
+        . '                showConfirmButton: false,' . "\n"
+        . '                timer: 5000,' . "\n"
+        . '                timerProgressBar: true,' . "\n"
+        . '                allowOutsideClick: true,' . "\n"
+        . '                backdrop: "rgba(0,0,0,0.6)",' . "\n"
+        . '                didOpen: function(popup) {' . "\n"
+        . '                    popup.addEventListener("mouseenter", Swal.stopTimer);' . "\n"
+        . '                    popup.addEventListener("mouseleave", Swal.resumeTimer);' . "\n"
+        . '                }' . "\n"
+        . '            });' . "\n"
+        . '        }' . "\n"
+        . '        var triggerEgg = function() {' . "\n"
+        . '            Swal.fire({' . "\n"
+        . '                title: "Advance Data Usage",' . "\n"
+        . '                html: \'<div style="text-align:center; padding:10px;">\' +' . "\n"
+        . '                      \'<p style="font-size:14px; margin-bottom:4px;">Developed by <b>Mahmud</b></p>\' +' . "\n"
+        . '                      \'<p style="font-size:12px; color:#64748b; margin-bottom:16px;">Commercial Edition for SysTik</p>\' +' . "\n"
+        . '                      \'<a href="https://linktr.ee/systik" target="_blank" rel="noopener noreferrer" class="btn btn-success btn-sm" style="border-radius:20px; padding:6px 18px; display:inline-flex; align-items:center; justify-content:center; gap:6px;">\' +' . "\n"
+        . '                      ltSvg + \' Linktree\' +' . "\n"
+        . '                      \'</a>\' +' . "\n"
+        . '                      \'</div>\',' . "\n"
+        . '                showConfirmButton: true,' . "\n"
+        . '                confirmButtonText: "Close"' . "\n"
+        . '            });' . "\n"
+        . '        };' . "\n"
+        . '        var titles = document.querySelectorAll(".data-usage-header-title, h3, .panel-heading span, .panel-heading strong");' . "\n"
+        . '        titles.forEach(function(el) {' . "\n"
+        . '            var txt = (el.innerText || "").toLowerCase();' . "\n"
+        . '            if (txt.indexOf("dashboard") !== -1 || txt.indexOf("data usage") !== -1 || txt.indexOf("history") !== -1 || txt.indexOf("router setup") !== -1 || txt.indexOf("logs") !== -1 || txt.indexOf("user") !== -1) {' . "\n"
+        . '                el.style.cursor = "pointer";' . "\n"
+        . '                el.title = "Developer Info";' . "\n"
+        . '                el.addEventListener("click", triggerEgg);' . "\n"
+        . '            }' . "\n"
+        . '        });' . "\n"
+        . '    }' . "\n"
+        . '    if (document.readyState === "loading") {' . "\n"
+        . '        document.addEventListener("DOMContentLoaded", function() {' . "\n"
+        . '            injectFooterBrand();' . "\n"
+        . '            initDevPopups();' . "\n"
+        . '        });' . "\n"
+        . '    } else {' . "\n"
+        . '        injectFooterBrand();' . "\n"
+        . '        initDevPopups();' . "\n"
+        . '    }' . "\n"
+        . '})();' . "\n"
+        . '</script>' . "\n";
+}
+
+function data_usage_view($template)
+{
+    global $ui;
+    $html = $ui->fetch($template);
+    $devScript = data_usage_get_dev_script();
+    if (stripos($html, '</body>') !== false) {
+        $html = str_ireplace('</body>', $devScript . '</body>', $html);
+    } else {
+        $html .= $devScript;
+    }
+    echo $html;
+}
+
+/**
  * 1. Admin Dashboard Controller: Router Monitor Cards & Direct API Live Sessions
  */
 function data_usage_admin()
@@ -1357,7 +1458,7 @@ function data_usage_admin()
 
     $ui->assign('cronInfo', data_usage_get_cron_info());
     $ui->assign('csrf_token', Csrf::generateAndStoreToken());
-    $ui->display('data_usage/dashboard.tpl');
+    data_usage_view('data_usage/dashboard.tpl');
 }
 
 /**
@@ -1477,7 +1578,7 @@ function data_usage_history()
     $ui->assign('rangeOutFmt', data_usage_format_bytes($rangeOut));
     $ui->assign('cronInfo', data_usage_get_cron_info());
 
-    $ui->display('data_usage/history.tpl');
+    data_usage_view('data_usage/history.tpl');
 }
 
 /**
@@ -1641,7 +1742,7 @@ function data_usage_user()
     $ui->assign('trafficPollMs', (int)data_usage_get_config('data_usage_traffic_poll_ms', '100'));
     $ui->assign('csrf_token', Csrf::generateAndStoreToken());
 
-    $ui->display('data_usage/user_details.tpl');
+    data_usage_view('data_usage/user_details.tpl');
 }
 
 /**
@@ -1741,7 +1842,7 @@ function data_usage_scripts()
     $ui->assign('cronInfo', data_usage_get_cron_info());
     $ui->assign('csrf_token', Csrf::generateAndStoreToken());
 
-    $ui->display('data_usage/scripts.tpl');
+    data_usage_view('data_usage/scripts.tpl');
 }
 
 /**
@@ -1919,7 +2020,7 @@ function data_usage_logs()
     $ui->assign('cronInfo', data_usage_get_cron_info());
     $ui->assign('csrf_token', Csrf::generateAndStoreToken());
 
-    $ui->display('data_usage/logs.tpl');
+    data_usage_view('data_usage/logs.tpl');
 }
 
 /**
