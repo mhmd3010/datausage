@@ -150,6 +150,13 @@ table th {
                                     Install on Target
                                 </button>
                             </form>
+                            <form method="POST" action="{$_url}plugin/data_usage_remove_poller" style="display: inline-block;">
+                                <input type="hidden" name="csrf_token" value="{$csrf_token}">
+                                <input type="hidden" name="router_id" value="{$selectedRouterId}">
+                                <button type="submit" class="btn btn-sm btn-danger" style="font-weight: 600;" onclick="return confirm('Are you sure you want to remove the poller script from the target router?');">
+                                    Remove from Target
+                                </button>
+                            </form>
                         </div>
                     </div>
                 </div>

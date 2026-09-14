@@ -20,6 +20,7 @@ register_menu("", true, "data_usage_sync", "", "", '', '', ['SuperAdmin', 'Admin
 register_menu("", true, "data_usage_export", "", "", '', '', ['SuperAdmin', 'Admin']);
 register_menu("", true, "data_usage_disconnect", "", "", '', '', ['SuperAdmin', 'Admin']);
 register_menu("", true, "data_usage_install_poller", "", "", '', '', ['SuperAdmin', 'Admin']);
+register_menu("", true, "data_usage_remove_poller", "", "", '', '', ['SuperAdmin', 'Admin']);
 register_menu("", true, "data_usage_manage_profile_scripts", "", "", '', '', ['SuperAdmin', 'Admin']);
 register_menu("", true, "data_usage_live_status", "", "", '', '', ['SuperAdmin', 'Admin']);
 register_menu("", true, "data_usage_async_routers_status", "", "", '', '', ['SuperAdmin', 'Admin']);
@@ -3199,6 +3200,11 @@ function data_usage_install_poller_to_router($router)
 function data_usage_install_poller()
 {
     _admin();
+    $csrf_token = $_POST['csrf_token'] ?? $_GET['csrf_token'] ?? '';
+    if (!Csrf::check($csrf_token)) {
+        r2(getUrl('plugin/data_usage_scripts'), 'e', 'Security token expired. Please try again.');
+    }
+
     $routerId = isset($_POST['router_id']) ? (int)$_POST['router_id'] : (isset($_GET['router_id']) ? (int)$_GET['router_id'] : 0);
 
     $routers = [];
@@ -3234,3 +3240,92 @@ function data_usage_install_poller()
         r2($redirectUrl, 'e', implode('; ', $errors));
     }
 }
+
+function data_usage_remove_poller_from_router($router)
+{
+    try {
+        $client = data_usage_get_mikrotik_client($router, 7.0);
+        if (!$client) {
+            $client = Mikrotik::getClient($router->ip_address, $router->username, $router->password);
+        }
+        if (!$client) {
+            return [false, 'Failed to connect to router API (' . $router->name . ')'];
+        }
+
+        // 1. Scheduler Management (Remove schedule if exists)
+        try {
+            $schedReq = new RouterOS\Request('/system/scheduler/print');
+            $schedReq->setQuery(RouterOS\Query::where('name', 'dataUsagePollerSchedule'));
+            $existingSched = $client->sendSync($schedReq);
+
+            foreach ($existingSched as $esh) {
+                $delSched = new RouterOS\Request('/system/scheduler/remove');
+                $delSched->setArgument('numbers', $esh->getProperty('.id'));
+                $client->sendSync($delSched);
+            }
+        } catch (Exception $eCleanSched) {}
+
+        // 2. Script Management (Remove script if exists)
+        try {
+            $scriptReq = new RouterOS\Request('/system/script/print');
+            $scriptReq->setQuery(RouterOS\Query::where('name', 'dataUsagePoller'));
+            $existingScripts = $client->sendSync($scriptReq);
+
+            foreach ($existingScripts as $es) {
+                $delReq = new RouterOS\Request('/system/script/remove');
+                $delReq->setArgument('numbers', $es->getProperty('.id'));
+                $client->sendSync($delReq);
+            }
+        } catch (Exception $eCleanScript) {}
+
+        data_usage_log($router->name, 'Live poller script and scheduler removed from router', 'info');
+        return [true, 'Removed successfully from ' . $router->name];
+    } catch (Exception $e) {
+        return [false, $router->name . ': ' . $e->getMessage()];
+    }
+}
+
+function data_usage_remove_poller()
+{
+    _admin();
+    $csrf_token = $_POST['csrf_token'] ?? $_GET['csrf_token'] ?? '';
+    if (!Csrf::check($csrf_token)) {
+        r2(getUrl('plugin/data_usage_scripts'), 'e', 'Security token expired. Please try again.');
+    }
+
+    $routerId = isset($_POST['router_id']) ? (int)$_POST['router_id'] : (isset($_GET['router_id']) ? (int)$_GET['router_id'] : 0);
+
+    $routers = [];
+    if ($routerId > 0) {
+        $r = ORM::for_table('tbl_routers')->where('enabled', '1')->find_one($routerId);
+        if ($r) $routers[] = $r;
+    } else {
+        $routers = ORM::for_table('tbl_routers')->where('enabled', '1')->find_many();
+    }
+
+    if (empty($routers)) {
+        r2(getUrl('plugin/data_usage_scripts'), 'e', 'No enabled routers found');
+    }
+
+    $success = [];
+    $errors = [];
+    foreach ($routers as $router) {
+        list($ok, $msg) = data_usage_remove_poller_from_router($router);
+        if ($ok) {
+            $success[] = $msg;
+        } else {
+            $errors[] = $msg;
+        }
+    }
+
+    $redirectUrl = getUrl('plugin/data_usage_scripts') . ($routerId > 0 ? '&router_id=' . $routerId : '');
+
+    if (!empty($success)) {
+        $msg = implode('; ', $success);
+        if (!empty($errors)) $msg .= ' (Errors: ' . implode('; ', $errors) . ')';
+        r2($redirectUrl, !empty($errors) ? 'w' : 's', $msg);
+    } else {
+        r2($redirectUrl, 'e', implode('; ', $errors));
+    }
+}
+
