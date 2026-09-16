@@ -1,54 +1,52 @@
 # Advanced Data Usage Plugin for PHPNuxBill
 
+[![StandWithPalestine](https://raw.githubusercontent.com/Safouene1/support-palestine-banner/master/StandWithPalestine.svg)](https://github.com/Safouene1/support-palestine-banner/blob/master/Markdown-pages/Support.md)
 
+[![Platform](https://img.shields.io/badge/platform-PHPNuxBill-3B82F6?style=flat-square)](#)
+[![PHP](https://img.shields.io/badge/PHP-777BB4?style=flat-square&logo=php&logoColor=white)](#)
+[![MikroTik](https://img.shields.io/badge/MikroTik-RouterOS-293239?style=flat-square)](#)
+[![LICENSE](https://img.shields.io/badge/LICENSE-MIT-FF6655?style=flat-square)](#)
 
-A complete PPPoE & Hotspot session tracking and bandwidth monitoring plugin — real-time, lightweight, and reboot-safe.
+A real-time, reboot-safe session tracking and bandwidth monitoring plugin for **MikroTik PPPoE and Hotspot networks**.
 
+Automatically handles:
 
+- Hybrid telemetry sync combining RouterOS API, on-router scheduler scripts, and server cron
+- Live upload and download traffic graphing with minimum, average, and peak metrics
+- Centralized multi-router connectivity checks and active client counts
+- Stored offline session visibility when routers lose connectivity
+- Automatic reconciliation to purge and close orphaned or crashed sessions
+- Historical logging for up to 100 recent connections and 30 days of aggregated user data
 
-## Features
+## Install
 
+Copy the plugin files into your PHPNuxBill directories:
 
+```bash
+# Plugin logic
+cp dataUsage.php system/plugin/
 
-- **Hybrid tracking engine** — RouterOS API, on-router scripts/scheduler, and server-side cron working together
+# UI templates and assets
+cp -r data_usage system/plugin/ui/
+```
 
-- **Real-time session dashboard** — live online/offline status fetched directly via API for instant network diagnostics
+## Setup
 
-- **Live Traffic Monitor** — real-time upload/download graph per user with Min/Avg/Max stats
+1. Log into your PHPNuxBill admin dashboard.
+2. Navigate to **Plugin Manager** and enable **Advanced Data Usage**.
+3. Go to the plugin's **Settings** page to finalize router script deployment and cron configuration.
 
-- **Router Monitor overview** — see all routers' online/offline status and connected user counts at a glance
+## Configuration
 
-- **Works with offline routers** — view last known session data even when a router is unreachable
+| Feature | Limit / Specification |
+|---:|---|
+| Session Retention | Up to 100 entries per subscriber |
+| Usage History | Up to 30 days aggregated data |
+| Engine Type | Hybrid (API + On-Router Scripts + Cron) |
+| Target Networks | PPPoE & Hotspot |
 
-- **Session history** — up to 100 recent sessions per user, with start/end time, duration, and disconnect reason
+## Support/Donate
 
-- **Daily usage history** — up to 30 days of aggregated usage per user
+If you found this project helpful for your business or personal use, consider supporting the development.
 
-- **Multi-router support** — fully isolated tracking, filtering, and reconciliation per router
-
-- **Auto reconciliation** — safely closes stale/crashed sessions without manual cleanup
-
-
-
-## Installation
-
-
-
-1. Copy `dataUsage.php` to `system/plugin/`
-
-2. Copy the `data_usage` folder to `system/plugin/ui/`
-
-3. Log into the admin dashboard and follow the setup instructions on the **Settings** page
-
-
-
-## Support
-
-
-
-If this plugin saved you time, consider buying me a meal 🙂
-
-
-
-[![Buy me a Coffee](https://img.shields.io/badge/Support-Buy%20me%20a%20Coffee-ff69b4?style=for-the-badge&logo=kofi&logoColor=white)](https://wa.me/@systik_ofc?text=I%20wanna%20buy%20you%20a%20meal)
-
+[![Buy me a Coffee](https://img.shields.io/badge/Support-Mahmud-ff69b4?style=for-the-badge&logo=kofi&logoColor=white)](https://linktr.ee/systik)
