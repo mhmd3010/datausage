@@ -77,6 +77,10 @@ function data_usage_init_db()
         ORM::raw_execute("ALTER TABLE tbl_data_usage_sessions ADD COLUMN IF NOT EXISTS uptime VARCHAR(32) DEFAULT NULL");
     } catch (Exception $e) {}
 
+    try {
+        ORM::raw_execute("ALTER TABLE tbl_data_usage_sessions ADD INDEX IF NOT EXISTS idx_router_user (router_id, username)");
+    } catch (Exception $e) {}
+
     // Daily Aggregated Usage Table
     ORM::raw_execute("CREATE TABLE IF NOT EXISTS tbl_data_usage_daily (
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -948,6 +952,7 @@ function data_usage_get_router_monitor_data($router)
         // Use the exact same live session query to get 100% consistent online count (PPPoE + Hotspot only)
         $liveSessions = data_usage_get_direct_live_sessions($router);
         $onlineCount = count($liveSessions);
+        $info['live_sessions'] = $liveSessions;
 
         // Count configured PPPoE secrets (filter for pppoe or any) + Hotspot users
         $pppSecretCount = 0;
@@ -1034,14 +1039,11 @@ function data_usage_get_direct_live_sessions($router)
                     $addr     = $pppMap[$uName]['address'] ?? '';
                     $uptime   = $pppMap[$uName]['uptime'] ?? '';
                     $sId      = $pppMap[$uName]['session_id'] ?? data_usage_clean_session_id($callerId, $uName, $callerId);
-
-                    // Check customer fullname
-                    $cust = ORM::for_table('tbl_customers')->where('username', $uName)->find_one();
                     $realStartTime = data_usage_parse_routeros_datetime($linkUp, $uptime);
 
                     $sessions[] = [
                         'username'        => $uName,
-                        'fullname'        => $cust ? $cust->fullname : '',
+                        'fullname'        => '',
                         'session_id'      => $sId,
                         'service'         => 'PPPoE',
                         'router_id'       => $router->id,
@@ -1059,7 +1061,7 @@ function data_usage_get_direct_live_sessions($router)
                         'bytes_out_fmt'   => data_usage_format_bytes($rawTx),
                         'total_bytes_fmt' => data_usage_format_bytes($rawRx + $rawTx),
                         'last_seen'       => $now,
-                        'status'          => 'active'
+                        'status'          => 'Online'
                     ];
                 }
             }
@@ -1084,11 +1086,9 @@ function data_usage_get_direct_live_sessions($router)
                         ? $rawSid 
                         : data_usage_generate_hotspot_session_id($uName, $mac, strtotime($calcStartTime));
 
-                    $cust = ORM::for_table('tbl_customers')->where('username', $uName)->find_one();
-
                     $sessions[] = [
                         'username'        => $uName,
-                        'fullname'        => $cust ? $cust->fullname : '',
+                        'fullname'        => '',
                         'session_id'      => $sId,
                         'service'         => 'Hotspot',
                         'router_id'       => $router->id,
@@ -1106,11 +1106,31 @@ function data_usage_get_direct_live_sessions($router)
                         'bytes_out_fmt'   => data_usage_format_bytes($rx),
                         'total_bytes_fmt' => data_usage_format_bytes($tx + $rx),
                         'last_seen'       => $now,
-                        'status'          => 'active'
+                        'status'          => 'Online'
                     ];
                 }
             }
         } catch (Exception $eHs) {}
+
+        // Batch fetch customer fullnames in 1 single fast query for online users only
+        $activeUsernames = array_unique(array_filter(array_column($sessions, 'username')));
+        if (!empty($activeUsernames)) {
+            try {
+                $custRows = ORM::for_table('tbl_customers')
+                    ->select_many('username', 'fullname')
+                    ->where_in('username', array_values($activeUsernames))
+                    ->find_array();
+                $custMap = [];
+                foreach ($custRows as $cr) {
+                    $custMap[strtolower($cr['username'])] = $cr['fullname'];
+                }
+                foreach ($sessions as &$s) {
+                    $uLower = strtolower($s['username']);
+                    $s['fullname'] = $custMap[$uLower] ?? '';
+                }
+                unset($s);
+            } catch (Exception $eCust) {}
+        }
     } catch (Exception $e) {}
 
     return $sessions;
@@ -1257,50 +1277,75 @@ function data_usage_admin()
                 data_usage_sync_router_users($currentRouter->id);
             }
 
-            // 1. Fetch live sessions if online
-            $liveSessions = [];
-            $liveMap = [];
-            if ($routerIsOnline) {
+            // 1. Fetch live sessions directly (already populated with fullnames in batch)
+            $liveSessions = $currentRouterInfo['live_sessions'] ?? [];
+            if ($routerIsOnline && empty($liveSessions)) {
                 $liveSessions = data_usage_get_direct_live_sessions($currentRouter);
-                foreach ($liveSessions as $ls) {
-                    $key = strtolower($ls['username']) . '_' . strtolower($ls['service']);
-                    $liveMap[$key] = $ls;
-                    $liveMap[strtolower($ls['username'])] = $ls;
-                }
             }
 
-            // 2. Fetch all users for this router from tbl_data_usage_router_users
-            $routerUsers = ORM::for_table('tbl_data_usage_router_users')
-                ->where('router_id', $currentRouter->id)
-                ->order_by_asc('username')
-                ->find_many();
+            $liveMap = [];
+            foreach ($liveSessions as $ls) {
+                $key = strtolower($ls['username']) . '_' . strtolower($ls['service']);
+                $liveMap[$key] = $ls;
+                $liveMap[strtolower($ls['username'])] = $ls;
+            }
 
-            $seenUsers = [];
+            // 2. Fetch all registered users for this router in 1 fast query (plain array, no ORM objects)
+            $routerUsers = ORM::for_table('tbl_data_usage_router_users')
+                ->select_many('username', 'service', 'mac_address')
+                ->where('router_id', $currentRouter->id)
+                ->where_null('missing_since')
+                ->order_by_asc('username')
+                ->find_array();
+
+            // 3. Batch fetch customer fullnames in 1 fast query
+            $custMap = [];
+            try {
+                $custRows = ORM::for_table('tbl_customers')
+                    ->select_many('username', 'fullname')
+                    ->find_array();
+                foreach ($custRows as $cr) {
+                    $custMap[strtolower($cr['username'])] = $cr['fullname'];
+                }
+            } catch (Exception $eCust) {}
+
+            // 4. Batch fetch latest offline session last_seen in 1 fast query
+            $lastSeenMap = [];
+            try {
+                $sessSummary = ORM::for_table('tbl_data_usage_sessions')
+                    ->raw_query("SELECT username, MAX(COALESCE(closed_time, last_seen)) AS last_time FROM tbl_data_usage_sessions WHERE router_id = ? GROUP BY username", [$currentRouter->id])
+                    ->find_array();
+                foreach ($sessSummary as $ss) {
+                    $lastSeenMap[strtolower($ss['username'])] = $ss['last_time'];
+                }
+            } catch (Exception $eSess) {}
+
+            // 5. Assemble all users in memory (pure O(1) array operations - 0 database queries in loop)
             $allUsers = [];
+            $seenUsers = [];
             $onlineCount = 0;
             $offlineCount = 0;
 
             foreach ($routerUsers as $ru) {
-                $uName = $ru->username;
-                $svc = $ru->service ?: 'PPPoE';
+                $uName = $ru['username'];
+                $svc = $ru['service'] ?: 'PPPoE';
                 $key = strtolower($uName) . '_' . strtolower($svc);
                 $seenUsers[$key] = true;
-
-                $cust = ORM::for_table('tbl_customers')->where('username', $uName)->find_one();
-                $fullname = $cust ? $cust->fullname : '';
+                $seenUsers[strtolower($uName)] = true;
+                $fullname = $custMap[strtolower($uName)] ?? '';
 
                 if (isset($liveMap[$key]) || isset($liveMap[strtolower($uName)])) {
                     $live = $liveMap[$key] ?? $liveMap[strtolower($uName)];
                     $onlineCount++;
                     $allUsers[] = [
                         'username'        => $uName,
-                        'fullname'        => $fullname ?: $live['fullname'],
+                        'fullname'        => $fullname ?: ($live['fullname'] ?? ''),
                         'session_id'      => $live['session_id'],
                         'service'         => $live['service'] ?: $svc,
                         'router_id'       => $currentRouter->id,
                         'router_name'     => $currentRouter->name,
                         'ip_address'      => $live['ip_address'],
-                        'mac_address'     => $live['mac_address'] ?: $ru->mac_address,
+                        'mac_address'     => $live['mac_address'] ?: ($ru['mac_address'] ?: '-'),
                         'start_time'      => $live['start_time'],
                         'last_seen'       => $live['uptime_fmt'],
                         'uptime_fmt'      => $live['uptime_fmt'],
@@ -1316,45 +1361,40 @@ function data_usage_admin()
                     ];
                 } else {
                     $offlineCount++;
-                    // Lookup last recorded session for this user on this router
-                    $lastSess = ORM::for_table('tbl_data_usage_sessions')
-                        ->where('router_id', $currentRouter->id)
-                        ->where('username', $uName)
-                        ->order_by_desc('id')
-                        ->find_one();
-
+                    $lastTime = $lastSeenMap[strtolower($uName)] ?? '-';
                     $allUsers[] = [
                         'username'        => $uName,
                         'fullname'        => $fullname,
-                        'session_id'      => $lastSess ? $lastSess->session_id : '-',
+                        'session_id'      => '-',
                         'service'         => $svc,
                         'router_id'       => $currentRouter->id,
                         'router_name'     => $currentRouter->name,
-                        'ip_address'      => $lastSess ? ($lastSess->ip_address ?: '-') : '-',
-                        'mac_address'     => $ru->mac_address ?: ($lastSess ? ($lastSess->mac_address ?: '-') : '-'),
-                        'start_time'      => $lastSess ? $lastSess->start_time : '-',
-                        'last_seen'       => $lastSess ? ($lastSess->closed_time ?: $lastSess->last_seen) : '-',
+                        'ip_address'      => '-',
+                        'mac_address'     => !empty($ru['mac_address']) ? $ru['mac_address'] : '-',
+                        'start_time'      => '-',
+                        'last_seen'       => $lastTime,
                         'uptime_fmt'      => '-',
                         'uptime_seconds'  => 0,
-                        'bytes_in'        => $lastSess ? (float)$lastSess->bytes_in : 0,
-                        'bytes_out'       => $lastSess ? (float)$lastSess->bytes_out : 0,
-                        'total_bytes'     => $lastSess ? (float)$lastSess->total_bytes : 0,
-                        'bytes_in_fmt'    => $lastSess ? data_usage_format_bytes($lastSess->bytes_in) : '0 B',
-                        'bytes_out_fmt'   => $lastSess ? data_usage_format_bytes($lastSess->bytes_out) : '0 B',
-                        'total_bytes_fmt' => $lastSess ? data_usage_format_bytes($lastSess->total_bytes) : '0 B',
+                        'bytes_in'        => 0,
+                        'bytes_out'       => 0,
+                        'total_bytes'     => 0,
+                        'bytes_in_fmt'    => '0 B',
+                        'bytes_out_fmt'   => '0 B',
+                        'total_bytes_fmt' => '0 B',
                         'status'          => 'Offline',
-                        'close_reason'    => $lastSess ? ($lastSess->close_reason ?: 'Disconnected') : '-'
+                        'close_reason'    => 'Disconnected'
                     ];
                 }
             }
 
-            // Include any live sessions that weren't in secrets table
+            // Include any active RouterOS sessions that were not in router_users table
             foreach ($liveSessions as $ls) {
                 $key = strtolower($ls['username']) . '_' . strtolower($ls['service']);
                 if (!isset($seenUsers[$key]) && !isset($seenUsers[strtolower($ls['username'])])) {
                     $onlineCount++;
                     $seenUsers[$key] = true;
                     $allUsers[] = array_merge($ls, [
+                        'fullname'        => $custMap[strtolower($ls['username'])] ?? ($ls['fullname'] ?? ''),
                         'status'          => 'Online',
                         'last_seen'       => $ls['uptime_fmt'],
                         'uptime_seconds'  => $ls['uptime_seconds'] ?? data_usage_uptime_to_seconds($ls['uptime_fmt']),
@@ -1363,66 +1403,12 @@ function data_usage_admin()
                 }
             }
 
-            // If still empty, fallback to sessions table
-            if (empty($allUsers)) {
-                $distinctSessUsers = ORM::for_table('tbl_data_usage_sessions')
-                    ->where('router_id', $currentRouter->id)
-                    ->order_by_desc('last_seen')
-                    ->limit(200)
-                    ->find_many();
-                foreach ($distinctSessUsers as $ds) {
-                    $key = strtolower($ds->username) . '_' . strtolower($ds->service);
-                    if (!isset($seenUsers[$key])) {
-                        $seenUsers[$key] = true;
-                        $cust = ORM::for_table('tbl_customers')->where('username', $ds->username)->find_one();
-                        $isLive = isset($liveMap[$key]) || isset($liveMap[strtolower($ds->username)]);
-                        if ($isLive) {
-                            $onlineCount++;
-                            if ($ds->status === 'active' && isset($liveMap[$key]['session_id']) && $ds->session_id !== $liveMap[$key]['session_id']) {
-                                $ds->status = 'closed';
-                                $ds->closed_time = $now;
-                                $ds->close_reason = 'New session started';
-                                $ds->save();
-                            }
-                        } else {
-                            $offlineCount++;
-                        }
-
-                        $uptimeVal = $isLive ? ($liveMap[$key]['uptime_fmt'] ?? $ds->uptime) : '';
-                        $uptimeFmt = !empty($uptimeVal) ? data_usage_format_uptime(data_usage_uptime_to_seconds($uptimeVal)) : '-';
-
-                        $allUsers[] = [
-                            'id'              => $ds->id,
-                            'username'        => $ds->username,
-                            'fullname'        => $cust ? $cust->fullname : '',
-                            'session_id'      => $ds->session_id,
-                            'service'         => $ds->service,
-                            'router_id'       => $currentRouter->id,
-                            'router_name'     => $currentRouter->name,
-                            'ip_address'      => $ds->ip_address,
-                            'mac_address'     => $ds->mac_address,
-                            'start_time'      => $ds->start_time,
-                            'last_seen'       => $isLive ? ($liveMap[$key]['uptime_fmt'] ?? $ds->uptime) : ($ds->closed_time ?: $ds->last_seen),
-                            'uptime_fmt'      => $uptimeFmt,
-                            'uptime_seconds'  => !empty($uptimeVal) ? data_usage_uptime_to_seconds($uptimeVal) : 0,
-                            'bytes_in'        => (float)$ds->bytes_in,
-                            'bytes_out'       => (float)$ds->bytes_out,
-                            'total_bytes'     => (float)$ds->total_bytes,
-                            'bytes_in_fmt'    => data_usage_format_bytes($ds->bytes_in),
-                            'bytes_out_fmt'   => data_usage_format_bytes($ds->bytes_out),
-                            'total_bytes_fmt' => data_usage_format_bytes($ds->total_bytes),
-                            'status'          => $isLive ? 'Online' : 'Offline',
-                            'close_reason'    => $isLive ? '-' : ($ds->close_reason ?: 'Disconnected')
-                        ];
-                    }
-                }
-            }
-
             $sessionsFormatted = $allUsers;
+            $totalUsersCount = count($allUsers);
             $ui->assign('routerIsOnline', $routerIsOnline);
             $ui->assign('onlineCount', $onlineCount);
             $ui->assign('offlineCount', $offlineCount);
-            $ui->assign('totalUsersCount', count($allUsers));
+            $ui->assign('totalUsersCount', $totalUsersCount);
         } else {
             r2(getUrl('plugin/data_usage_admin'), 'e', 'Router not found.');
         }
