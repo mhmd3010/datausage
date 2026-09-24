@@ -273,13 +273,15 @@ table th {
                         <div class="col-md-6">
                             <div class="form-group">
                                 <label style="font-weight: 600; font-size: 12px;">PPPoE On-Up Script:</label>
-                                <textarea class="form-control" rows="5" readonly style="font-family: monospace; font-size: 11px; background: #272822; color: #f8f8f2;">:local routerId "{$selectedRouterId}";
+                                <textarea class="form-control" rows="5" readonly style="font-family: monospace; font-size: 11px; background: #272822; color: #f8f8f2;">:delay 1s;
+:local routerId "{$selectedRouterId}";
 :local serverUrl "{$webhookUrl}";
-:local sid [/ppp active get [find name=$user] session-id];
-:local iface [/interface find where name=$interface];
-:local linkUp [/interface get $iface last-link-up-time];
+:local sid "";
+{literal}:foreach s in=[/ppp active find where name=$user] do={ :set sid [/ppp active get $s session-id]; }{/literal}
 {literal}:if ($sid = "") do={ :set sid $user; }{/literal}
-/tool fetch url=$serverUrl http-method=post http-data="action=session-start&router=$routerId&service=PPPoE&username=$user&session_id=$sid&mac=$caller-id&ip=$address&start_time=$linkUp" keep-result=no;</textarea>
+:local callerId $"caller-id";
+:local remoteIp $"remote-address";
+/tool fetch url=$serverUrl http-method=post http-data="action=session-start&router=$routerId&service=PPPoE&username=$user&session_id=$sid&mac=$callerId&ip=$remoteIp" keep-result=no;</textarea>
                             </div>
                             <div class="form-group">
                                 <label style="font-weight: 600; font-size: 12px;">PPPoE On-Down Script:</label>

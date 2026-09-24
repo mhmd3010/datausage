@@ -1864,14 +1864,16 @@ function data_usage_manage_profile_scripts()
     $webhookUrl = $appUrl . '/?_route=plugin/data_usage_webhook';
 
     // Script definitions
-    $pppOnUp = ':local routerId "' . $routerId . '";' . "\n"
+    $pppOnUp = ':delay 1s;' . "\n"
+        . ':local routerId "' . $routerId . '";' . "\n"
         . ':local serverUrl "' . $webhookUrl . '";' . "\n"
-        . ':local sid [/ppp active get [find name=$user] session-id];' . "\n"
-        . ':local iface [/interface find where name=$interface];' . "\n"
-        . ':local linkUp [/interface get $iface last-link-up-time];' . "\n"
+        . ':local sid "";' . "\n"
+        . ':foreach s in=[/ppp active find where name=$user] do={ :set sid [/ppp active get $s session-id]; }' . "\n"
         . ':if ($sid = "") do={ :set sid $user; };' . "\n"
-        . ':log info ("dataUsage [PPPoE on-up]: User " . $user . " connected (IP: " . $address . ", MAC: " . $caller-id . ", SessionID: " . $sid . ")");' . "\n"
-        . '/tool fetch url=$serverUrl http-method=post http-data="action=session-start&router=$routerId&service=PPPoE&username=$user&session_id=$sid&mac=$caller-id&ip=$address&start_time=$linkUp" keep-result=no;';
+        . ':local callerId $"caller-id";' . "\n"
+        . ':local remoteIp $"remote-address";' . "\n"
+        . ':log info ("dataUsage [PPPoE on-up]: User " . $user . " connected (IP: " . $remoteIp . ", MAC: " . $callerId . ", SessionID: " . $sid . ")");' . "\n"
+        . '/tool fetch url=$serverUrl http-method=post http-data="action=session-start&router=$routerId&service=PPPoE&username=$user&session_id=$sid&mac=$callerId&ip=$remoteIp" keep-result=no;';
 
     $pppOnDown = ':local routerId "' . $routerId . '";' . "\n"
         . ':local serverUrl "' . $webhookUrl . '";' . "\n"
