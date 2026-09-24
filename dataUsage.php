@@ -1725,7 +1725,7 @@ function data_usage_user()
     $ui->assign('activeSessionId', $activeSessionId);
     $ui->assign('activeRouterId', $activeRouterId);
     $ui->assign('activeService', $activeService);
-    $ui->assign('trafficPollMs', (int)data_usage_get_config('data_usage_traffic_poll_ms', '100'));
+    $ui->assign('trafficPollMs', 200);
     $ui->assign('csrf_token', Csrf::generateAndStoreToken());
 
     data_usage_view('data_usage/user_details.tpl');
@@ -1744,10 +1744,6 @@ function data_usage_scripts()
         $csrf_token = $_POST['csrf_token'] ?? '';
         if (!Csrf::check($csrf_token)) {
             r2(getUrl('plugin/data_usage_scripts'), 'e', 'Security token expired. Please try again.');
-        }
-        if (isset($_POST['traffic_poll_ms'])) {
-            $pollMs = max(30, min(5000, (int)$_POST['traffic_poll_ms']));
-            data_usage_set_config('data_usage_traffic_poll_ms', (string)$pollMs);
         }
         if (isset($_POST['log_retention_days'])) {
             $retention = max(0, min(365, (int)$_POST['log_retention_days']));
@@ -1823,7 +1819,6 @@ function data_usage_scripts()
     $ui->assign('hsProfiles', $hsProfiles);
     $ui->assign('webhookUrl', $webhookUrl);
     $ui->assign('appUrl', $appUrl);
-    $ui->assign('trafficPollMs', (int)data_usage_get_config('data_usage_traffic_poll_ms', '100'));
     $ui->assign('logRetentionDays', (int)data_usage_get_config('data_usage_log_retention_days', '30'));
     $ui->assign('cronInfo', data_usage_get_cron_info());
     $ui->assign('csrf_token', Csrf::generateAndStoreToken());
@@ -2549,7 +2544,7 @@ function data_usage_live_traffic()
             'download_bps' => $downloadBps,
             'upload_fmt'   => data_usage_format_bps($uploadBps),
             'download_fmt' => data_usage_format_bps($downloadBps),
-            'poll_ms'      => (int)data_usage_get_config('data_usage_traffic_poll_ms', '500'),
+            'poll_ms'      => 200,
             'timestamp'    => microtime(true)
         ]);
         exit;
@@ -3206,8 +3201,8 @@ function data_usage_generate_poller_source($routerId)
         . '    :local mac [/ip hotspot active get $i mac-address];' . "\n"
         . '    :local ip [/ip hotspot active get $i address];' . "\n"
         . '    :local uptime [/ip hotspot active get $i uptime];' . "\n"
-        . '    :local sessId [/ip hotspot active get $i session-id];' . "\n"
-        . '    :if ($sessId = "") do={ :set sessId $mac; }' . "\n"
+        . '    :local sessId $mac;' . "\n"
+        . '    :if ($sessId = "") do={ :set sessId $uName; }' . "\n"
         . '    :local rawRx [/ip hotspot active get $i bytes-in];' . "\n"
         . '    :local rawTx [/ip hotspot active get $i bytes-out];' . "\n"
         . '    :if ($isFirst = true) do={ :set isFirst false; } else={ :set jsonPayload ($jsonPayload . ","); }' . "\n"

@@ -18,7 +18,7 @@ table th {
             <a href="javascript:history.back()" class="btn btn-sm btn-default" style="font-weight: 600; border-radius: 6px;">
                 <i class="fa fa-arrow-left"></i> Back
             </a>
-            <h3 style="margin: 0; font-size: 20px; font-weight: 700; color: #1e293b;">
+            <h3 style="margin: 0; font-size: 20px; font-weight: 700;">
                 Settings
             </h3>
         </div>
@@ -66,7 +66,7 @@ table th {
                 <form method="POST" action="{$_url}plugin/data_usage_scripts" class="form-inline" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                     <input type="hidden" name="csrf_token" value="{$csrf_token}">
                     <input type="hidden" name="save_traffic_settings" value="1">
-                    <label style="font-weight: 600; font-size: 12px; margin-bottom: 0;">Auto-Prune Activity Logs:</label>
+                    <label style="font-weight: 600; font-size: 12px; margin-bottom: 0;">Keep Logs:</label>
                     <div class="input-group" style="width: 140px;">
                         <input type="number" name="log_retention_days" class="form-control input-sm" value="{$logRetentionDays|default:30}" min="0" max="365" required>
                         <span class="input-group-addon" style="font-size: 11px;">days</span>
@@ -92,9 +92,9 @@ table th {
             <div class="panel-body" style="padding: 16px;">
                 <!-- Main Config Row -->
                 <div class="row" style="margin-bottom: 16px;">
-                    <div class="col-md-3">
+                    <div class="col-md-4">
                         <div class="form-group" style="margin-bottom: 0;">
-                            <label style="font-weight: 600; font-size: 12px; margin-bottom: 4px;">Target Router:</label>
+                            <label style="font-weight: 600; font-size: 12px; margin-bottom: 4px;">Select Router:</label>
                             <select id="routerSelect" class="form-control input-sm" style="font-size: 11px;" onchange="window.location.href='{$_url}plugin/data_usage_scripts&router_id=' + this.value;">
                                 {foreach $routers as $r}
                                 <option value="{$r->id}" {if $selectedRouterId == $r->id}selected{/if}>
@@ -104,40 +104,9 @@ table th {
                             </select>
                         </div>
                     </div>
-                    <div class="col-md-5">
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label style="font-weight: 600; font-size: 12px; margin-bottom: 4px;">Webhook URL:</label>
-                            <div class="input-group">
-                                <input type="text" id="txtWebhookUrl" class="form-control input-sm" value="{$webhookUrl}" readonly style="font-family: monospace; font-size: 11px;">
-                                <span class="input-group-btn">
-                                    <button class="btn btn-default btn-sm" type="button" onclick="copyText('txtWebhookUrl')">
-                                        Copy
-                                    </button>
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <form method="POST" action="{$_url}plugin/data_usage_scripts" style="margin: 0;">
-                            <input type="hidden" name="csrf_token" value="{$csrf_token}">
-                            <input type="hidden" name="save_traffic_settings" value="1">
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label style="font-weight: 600; font-size: 12px; margin-bottom: 4px;">Interval:</label>
-                                <div class="input-group">
-                                    <input type="number" name="traffic_poll_ms" class="form-control input-sm" value="{$trafficPollMs|default:100}" min="30" max="5000" step="10" required>
-                                    <span class="input-group-addon" style="font-size: 11px; padding: 4px 8px;">ms</span>
-                                    <span class="input-group-btn">
-                                        <button type="submit" class="btn btn-primary btn-sm" style="font-weight: 600;">
-                                            Save
-                                        </button>
-                                    </span>
-                                </div>
-                            </div>
-                        </form>
-                    </div>
+                    
                 </div>
 
-                <hr style="margin: 12px 0 16px 0; border-color: #e2e8f0;">
 
                 <!-- Poller Action Row -->
                 <div class="row">
@@ -168,9 +137,9 @@ table th {
 <!-- 2. Profile Script Automation Panel -->
 <div class="row">
     <div class="col-sm-12">
-        <div class="panel panel-default" style="border-radius: 6px; margin-bottom: 18px; border: 1px solid #e2e8f0;">
-            <div class="panel-heading" style="background: #ffffff; border-bottom: 1px solid #e2e8f0; padding: 12px 16px;">
-                <strong style="color: #1e293b; font-size: 14px;">Automatic Profile Setup</strong>
+        <div class="panel panel-primary" style="border-radius: 6px; margin-bottom: 18px;">
+            <div class="panel-heading" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <span style="font-weight: 700;">Automatic Profile Setup</span>
             </div>
             <div class="panel-body" style="padding: 16px;">
                 {if !$routerOnline}
@@ -187,14 +156,14 @@ table th {
                         <!-- PPPoE Profiles Table -->
                         <div class="col-md-6" style="margin-bottom: 14px;">
                             <div style="margin-bottom: 8px;">
-                                <h5 style="margin: 0; font-weight: 700; color: #1e293b;">
+                                <h5 style="margin: 0; font-weight: 700;">
                                     PPPoE Profiles ({count($pppProfiles)})
                                 </h5>
                             </div>
-                            <div class="table-responsive" style="max-height: 220px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 4px;">
+                            <div class="table-responsive" style="max-height: 220px; overflow-y: auto; border-radius: 4px;">
                                 <table class="table table-striped table-hover profile-table" style="margin-bottom: 0;">
                                     <thead>
-                                        <tr style="background: #f8fafc;">
+                                        <tr>
                                             <th style="width: 40px; text-align: center;">
                                                 <input type="checkbox" id="checkAllPpp" onchange="toggleCheckboxes('chk_ppp_', this.checked, 'checkAllPpp')" title="Select All">
                                             </th>
@@ -232,14 +201,14 @@ table th {
                         <!-- Hotspot User Profiles Table -->
                         <div class="col-md-6" style="margin-bottom: 14px;">
                             <div style="margin-bottom: 8px;">
-                                <h5 style="margin: 0; font-weight: 700; color: #1e293b;">
+                                <h5 style="margin: 0; font-weight: 700;">
                                     Hotspot Profiles ({count($hsProfiles)})
                                 </h5>
                             </div>
-                            <div class="table-responsive" style="max-height: 220px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 4px;">
+                            <div class="table-responsive" style="max-height: 220px; overflow-y: auto; border-radius: 4px;">
                                 <table class="table table-striped table-hover profile-table" style="margin-bottom: 0;">
                                     <thead>
-                                        <tr style="background: #f8fafc;">
+                                        <tr>
                                             <th style="width: 40px; text-align: center;">
                                                 <input type="checkbox" id="checkAllHs" onchange="toggleCheckboxes('chk_hs_', this.checked, 'checkAllHs')" title="Select All">
                                             </th>
@@ -294,9 +263,9 @@ table th {
 <!-- 3. Manual Script Code Preview (Collapsible Accordion) -->
 <div class="row">
     <div class="col-sm-12">
-        <div class="panel panel-default" style="border-radius: 6px; margin-bottom: 20px; border: 1px solid #e2e8f0;">
-            <div class="panel-heading" style="cursor: pointer; background: #ffffff;" data-toggle="collapse" data-target="#manualScriptsCollapse">
-                <strong style="color: #64748b; font-size: 13px;">Manual Scripts (Optional)</strong>
+        <div class="panel panel-primary" style="border-radius: 6px; margin-bottom: 20px;">
+            <div class="panel-heading" style="cursor: pointer;" data-toggle="collapse" data-target="#manualScriptsCollapse">
+                <span style="font-weight: 700;">Manual Scripts (Optional)</span>
             </div>
             <div id="manualScriptsCollapse" class="panel-collapse collapse">
                 <div class="panel-body" style="padding: 16px;">

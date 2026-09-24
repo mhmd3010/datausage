@@ -373,7 +373,7 @@ function checkLiveStatus(username, routerId, service, btn) {
 }
 
 // ── Live Traffic Monitoring Engine (Chart.js + Configurable Chained Polling) ──
-var tmPollMs = parseInt('{$trafficPollMs|default:100}') || 100;
+var tmPollMs = parseInt('{$trafficPollMs|default:200}') || 200;
 
 var tmState = {
     isOpen: false,
