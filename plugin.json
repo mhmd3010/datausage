@@ -1,0 +1,10 @@
+{
+    "name": "Data Usage",
+    "slug": "dataUsage",
+    "version": "1.0.0",
+    "description": "",
+    "author": "",
+    "requires_php": "8.2",
+    "main": "dataUsage.php",
+    "converted_from_legacy": true
+}
