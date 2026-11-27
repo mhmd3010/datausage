@@ -33,7 +33,7 @@ register_menu("", false, "data_usage_collector", "", "");
 register_menu("", false, "data_usage_api", "", "");
 register_menu("", false, "dataUsage_webhook", "", "");
 
-define('DATA_USAGE_PLUGIN_VERSION', '1.1.1');
+define('DATA_USAGE_PLUGIN_VERSION', '1.1.2');
 define('DATA_USAGE_DB_VERSION', '1.0.6');
 
 /**
