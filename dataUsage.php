@@ -1655,6 +1655,7 @@ function data_usage_admin()
     $ui->assign('sessions', $sessionsFormatted);
 
     $ui->assign('cronInfo', data_usage_get_cron_info());
+    $ui->assign('cronCommand', '*/5 * * * * php ' . __DIR__ . '/cron_sync.php >/dev/null 2>&1');
     $ui->assign('csrf_token', Csrf::generateAndStoreToken());
     data_usage_view('data_usage/dashboard.tpl');
 }
@@ -2110,6 +2111,7 @@ function data_usage_scripts()
     $ui->assign('appUrl', $appUrl);
     $ui->assign('logRetentionDays', (int)data_usage_get_config('data_usage_log_retention_days', '30'));
     $ui->assign('cronInfo', data_usage_get_cron_info());
+    $ui->assign('cronCommand', '*/5 * * * * php ' . __DIR__ . '/cron_sync.php >/dev/null 2>&1');
     $ui->assign('csrf_token', Csrf::generateAndStoreToken());
 
     data_usage_view('data_usage/scripts.tpl');
@@ -2290,6 +2292,7 @@ function data_usage_logs()
     $ui->assign('logs', $logsFormatted);
     $ui->assign('totalLogs', count($logsFormatted));
     $ui->assign('cronInfo', data_usage_get_cron_info());
+    $ui->assign('cronCommand', '*/5 * * * * php ' . __DIR__ . '/cron_sync.php >/dev/null 2>&1');
     $ui->assign('csrf_token', Csrf::generateAndStoreToken());
 
     data_usage_view('data_usage/logs.tpl');
