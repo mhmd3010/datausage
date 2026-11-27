@@ -1,3 +1,5 @@
+<div align="center">
+
 # Advanced Data Usage Plugin for PHPNuxBill
 
 [![StandWithPalestine](https://raw.githubusercontent.com/Safouene1/support-palestine-banner/master/StandWithPalestine.svg)](https://github.com/Safouene1/support-palestine-banner/blob/master/Markdown-pages/Support.md)
@@ -8,6 +10,8 @@
 [![LICENSE](https://img.shields.io/badge/LICENSE-MIT-FF6655?style=flat-square)](#)
 
 Real-time session tracking and bandwidth monitoring for **MikroTik PPPoE and Hotspot** in PHPNuxBill.
+
+</div>
 
 ## Features
 
