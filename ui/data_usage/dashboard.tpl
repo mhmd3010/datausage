@@ -325,84 +325,6 @@ body.dark-mode .filter-toolbar,
                             </tr>
                         </thead>
                         <tbody>
-                            {if count($sessions) == 0}
-                            <tr>
-                                <td colspan="10" class="text-center text-muted" style="padding: 30px;">
-                                    No users found on {$currentRouter->name}.
-                                </td>
-                            </tr>
-                            {else}
-                            {foreach $sessions as $s}
-                            <tr id="session_row_{$s['username']|regex_replace:'/[^a-zA-Z0-9_-]/':'_'}" data-service="{$s['service']}" data-status="{$s['status']}">
-                                <td>
-                                    <a href="{$_url}plugin/data_usage_user&username={$s['username']|urlencode}&router_id={$s['router_id']}" style="font-weight: 600;">
-                                        {$s['username']}
-                                    </a>
-                                    {if !empty($s['fullname'])}
-                                    <br><small class="text-muted">{$s['fullname']}</small>
-                                    {/if}
-                                </td>
-                                <td class="col-service" data-search="{$s['service']}">
-                                    {if $s['service'] == 'PPPoE'}
-                                    <span class="label label-primary">PPPoE</span>
-                                    {else}
-                                    <span class="label label-warning">Hotspot</span>
-                                    {/if}
-                                </td>
-                                <td class="col-ip-mac">
-                                    {if $s['status'] == 'Online'}
-                                        <span style="font-family: monospace; font-size: 11px;">{$s['ip_address']}</span>
-                                        {if !empty($s['mac_address']) && $s['mac_address'] != '-'}
-                                        <br><span class="text-muted" style="font-family: monospace; font-size: 11px;">{$s['mac_address']}</span>
-                                        {/if}
-                                    {else}
-                                        {if !empty($s['mac_address']) && $s['mac_address'] != '-'}
-                                        <span class="text-muted" style="font-family: monospace; font-size: 11px;">{$s['mac_address']}</span>
-                                        {else}
-                                        <span class="text-muted">-</span>
-                                        {/if}
-                                    {/if}
-                                </td>
-                                <td class="col-status" data-search="{$s['status']}" data-order="{if $s['status'] == 'Online'}1{else}2{/if}">
-                                    {if $s['status'] == 'Online'}
-                                    <span class="label label-success">Online</span>
-                                    {else}
-                                    <span class="label label-default">Offline</span>
-                                    {/if}
-                                </td>
-                                <td class="col-uptime" data-sort="{$s['uptime_seconds']}">
-                                    {if $s['status'] == 'Online'}
-                                    <span class="text-primary" style="font-weight: 600;">{$s['uptime_fmt']}</span>
-                                    {else}
-                                    <span class="text-muted">-</span>
-                                    {/if}
-                                </td>
-                                <td class="col-last-seen">
-                                    {if $s['status'] == 'Online'}
-                                    <span class="label label-success">Now</span>
-                                    {else}
-                                    <small class="text-muted">{$s['last_seen']}</small>
-                                    {/if}
-                                </td>
-                                <td class="col-upload" data-sort="{$s['bytes_in']}"><span class="text-info">{$s['bytes_in_fmt']}</span></td>
-                                <td class="col-download" data-sort="{$s['bytes_out']}"><span class="text-success">{$s['bytes_out_fmt']}</span></td>
-                                <td class="col-total" data-sort="{$s['total_bytes']}"><strong>{$s['total_bytes_fmt']}</strong></td>
-                                <td style="text-align: center; white-space: nowrap;">
-                                    <button type="button" class="btn btn-xs btn-primary" onclick="refreshRow('{$s['username']}', '{$s['router_id']}', '{$s['service']}', this)">
-                                        Refresh
-                                    </button>
-                                    {if $s['status'] == 'Online'}
-                                    <button type="button" class="btn btn-xs btn-danger" onclick="disconnectUser('{$s['session_id']}', '{$s['router_id']}', '{$s['username']}')">
-                                        Disconnect
-                                    </button>
-                                    {/if}
-                                    <a href="{$_url}plugin/data_usage_user&username={$s['username']|urlencode}&router_id={$s['router_id']}" class="btn btn-xs btn-info">
-                                        History
-                                    </a>
-                                </td>
-                            </tr>
-                            {/foreach}
-                            {/if}
                         </tbody>
                     </table>
                 </div>
@@ -564,12 +486,24 @@ $(document).ready(function() {
 
     if ($('#datatable').length) {
         var dt = $('#datatable').DataTable({
+            "processing": true,
+            "serverSide": true,
+            "ajax": {
+                "url": '{$_url}plugin/data_usage_admin&router={$currentRouter->id}&ajax=1',
+                "type": "GET"
+            },
+            "searchCols": [
+                null,
+                null,
+                null,
+                { "search": "Online" }
+            ],
+            "columnDefs": [
+                { "orderable": false, "targets": [2, 5, 9] }
+            ],
             "pagingType": "full_numbers",
-            "order": [[ 0, "asc" ]] // Sort by Username ascending
+            "order": [[ 0, "asc" ]]
         });
-
-        // Apply default filter to Online on load
-        dt.column(3).search('Online').draw();
 
         // Quick Filter by Service (Column index 1)
         $('#serviceFilterGroup button').on('click', function() {

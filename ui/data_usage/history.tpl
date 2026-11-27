@@ -135,46 +135,6 @@ table th {
                             </tr>
                         </thead>
                         <tbody>
-                            {if count($history) == 0}
-                            <tr>
-                                <td colspan="9" class="text-center text-muted" style="padding: 25px;">
-                                    No data usage records found for this selection.
-                                </td>
-                            </tr>
-                            {else}
-                            {foreach $history as $h}
-                            <tr>
-                                <td>{$h['usage_date']}</td>
-                                <td>
-                                    <a href="{$_url}plugin/data_usage_user&username={$h['username']|urlencode}" style="font-weight: 600;">
-                                        {$h['username']}
-                                    </a>
-                                    {if !empty($h['fullname'])}
-                                    <br><small class="text-muted">{$h['fullname']}</small>
-                                    {/if}
-                                </td>
-                                <td>
-                                    {if $h['service'] == 'PPPoE'}
-                                    <span class="label label-primary">PPPoE</span>
-                                    {else}
-                                    <span class="label label-warning">Hotspot</span>
-                                    {/if}
-                                </td>
-                                <td>{$h['router_name']}</td>
-                                <td>
-                                    <span style="font-family: monospace; font-size: 11px;">{$h['mac_address']}</span>
-                                </td>
-                                <td data-sort="{$h['bytes_in']}"><span class="text-info">{$h['bytes_in_fmt']}</span></td>
-                                <td data-sort="{$h['bytes_out']}"><span class="text-success">{$h['bytes_out_fmt']}</span></td>
-                                <td data-sort="{$h['total_bytes']}"><strong>{$h['total_bytes_fmt']}</strong></td>
-                                <td class="text-center">
-                                    <a href="{$_url}plugin/data_usage_user&username={$h['username']|urlencode}" class="btn btn-xs btn-info">
-                                        Details
-                                    </a>
-                                </td>
-                            </tr>
-                            {/foreach}
-                            {/if}
                         </tbody>
                     </table>
                 </div>
@@ -188,6 +148,15 @@ table th {
 <script>
 $(document).ready(function() {
     $('#datatable').DataTable({
+        "processing": true,
+        "serverSide": true,
+        "ajax": {
+            "url": '{$_url}plugin/data_usage_history&ajax=1&start_date={$startDate|escape:"url"}&end_date={$endDate|escape:"url"}&router={$filterRouter}&service={$filterService|escape:"url"}&search={$search|escape:"url"}',
+            "type": "GET"
+        },
+        "columnDefs": [
+            { "orderable": false, "targets": [8] }
+        ],
         "pagingType": "full_numbers",
         "order": [[ 0, "desc" ]]
     });

@@ -33,8 +33,8 @@ register_menu("", false, "data_usage_collector", "", "");
 register_menu("", false, "data_usage_api", "", "");
 register_menu("", false, "dataUsage_webhook", "", "");
 
-define('DATA_USAGE_PLUGIN_VERSION', '1.1.0');
-define('DATA_USAGE_DB_VERSION', '1.0.5');
+define('DATA_USAGE_PLUGIN_VERSION', '1.1.1');
+define('DATA_USAGE_DB_VERSION', '1.0.6');
 
 /**
  * Auto-initialize Database Tables
@@ -80,6 +80,7 @@ function data_usage_init_db()
 
     try {
         ORM::raw_execute("ALTER TABLE tbl_data_usage_sessions ADD INDEX IF NOT EXISTS idx_router_user (router_id, username)");
+        ORM::raw_execute("ALTER TABLE tbl_data_usage_sessions ADD INDEX IF NOT EXISTS idx_sess_router_user_closed (router_id, username, closed_time, last_seen)");
     } catch (Exception $e) {}
 
     // Daily Aggregated Usage Table
@@ -121,6 +122,8 @@ function data_usage_init_db()
 
     try {
         ORM::raw_execute("ALTER TABLE tbl_data_usage_router_users ADD COLUMN IF NOT EXISTS missing_since DATETIME DEFAULT NULL");
+        ORM::raw_execute("ALTER TABLE tbl_data_usage_router_users ADD INDEX IF NOT EXISTS idx_ru_router_missing_user (router_id, missing_since, username)");
+        ORM::raw_execute("ALTER TABLE tbl_data_usage_daily ADD INDEX IF NOT EXISTS idx_daily_date_router_svc (usage_date, router_id, service)");
     } catch (Exception $e) {}
 
     // Event & Poller Logs Table
@@ -181,6 +184,29 @@ function data_usage_webhook_url($appUrl = null)
     $base = rtrim($appUrl !== null ? $appUrl : APP_URL, '/') . '/?_route=plugin/data_usage_webhook';
     $token = data_usage_get_webhook_token();
     return $token !== '' ? $base . '&token=' . rawurlencode($token) : $base;
+}
+
+function data_usage_batch_customers(array $usernames)
+{
+    $map = [];
+    $unique = array_values(array_unique(array_filter($usernames, function ($u) {
+        return $u !== '' && $u !== null;
+    })));
+    if (empty($unique)) {
+        return $map;
+    }
+    try {
+        foreach (array_chunk($unique, 500) as $chunk) {
+            $rows = ORM::for_table('tbl_customers')
+                ->select_many('username', 'fullname')
+                ->where_in('username', $chunk)
+                ->find_array();
+            foreach ($rows as $r) {
+                $map[strtolower($r['username'])] = $r['fullname'];
+            }
+        }
+    } catch (Exception $e) {}
+    return $map;
 }
 
 /**
@@ -1185,9 +1211,13 @@ function data_usage_get_dev_script()
         . '            var span = document.createElement("span");' . "\n"
         . '            span.id = "du_footer_brand";' . "\n"
         . '            span.className = "pull-right";' . "\n"
-        . '            span.style.cssText = "float:right; margin-left:auto;";' . "\n"
+        . '            span.style.cssText = "float:right; margin-left:auto; margin-right:12px;";' . "\n"
         . '            span.innerHTML = \'<b>Data Usage</b> | <a href="https://t.me/mhmd_3010" target="_blank" rel="noopener noreferrer">Mahmud</a> | V ' . $duVer . '\';' . "\n"
-        . '            footer.appendChild(span);' . "\n"
+        . '            if (footer.classList.contains("main-footer") && footer.firstChild) {' . "\n"
+        . '                footer.insertBefore(span, footer.firstChild);' . "\n"
+        . '            } else {' . "\n"
+        . '                footer.appendChild(span);' . "\n"
+        . '            }' . "\n"
         . '        }' . "\n"
         . '    }' . "\n"
         . '    function initDevPopups() {' . "\n"
@@ -1333,128 +1363,260 @@ function data_usage_admin()
                 $liveSessions = data_usage_get_direct_live_sessions($currentRouter);
             }
 
+            // 2. Counts only on initial load; DataTables loads rows via server-side AJAX (&ajax=1)
             $liveMap = [];
+            $onlineKeys = [];
             foreach ($liveSessions as $ls) {
                 $key = strtolower($ls['username']) . '_' . strtolower($ls['service']);
                 $liveMap[$key] = $ls;
                 $liveMap[strtolower($ls['username'])] = $ls;
+                $onlineKeys[strtolower($ls['username'])] = true;
             }
-
-            // 2. Fetch all registered users for this router in 1 fast query (plain array, no ORM objects)
-            $routerUsers = ORM::for_table('tbl_data_usage_router_users')
-                ->select_many('username', 'service', 'mac_address')
+            $onlineCount = count($liveSessions);
+            $totalUsersCount = (int) ORM::for_table('tbl_data_usage_router_users')
                 ->where('router_id', $currentRouter->id)
                 ->where_null('missing_since')
-                ->order_by_asc('username')
-                ->find_array();
-
-            // 3. Batch fetch customer fullnames in 1 fast query
-            $custMap = [];
-            try {
-                $custRows = ORM::for_table('tbl_customers')
-                    ->select_many('username', 'fullname')
-                    ->find_array();
-                foreach ($custRows as $cr) {
-                    $custMap[strtolower($cr['username'])] = $cr['fullname'];
-                }
-            } catch (Exception $eCust) {}
-
-            // 4. Batch fetch latest offline session last_seen in 1 fast query
-            $lastSeenMap = [];
-            try {
-                $sessSummary = ORM::for_table('tbl_data_usage_sessions')
-                    ->raw_query("SELECT username, MAX(COALESCE(closed_time, last_seen)) AS last_time FROM tbl_data_usage_sessions WHERE router_id = ? GROUP BY username", [$currentRouter->id])
-                    ->find_array();
-                foreach ($sessSummary as $ss) {
-                    $lastSeenMap[strtolower($ss['username'])] = $ss['last_time'];
-                }
-            } catch (Exception $eSess) {}
-
-            // 5. Assemble all users in memory (pure O(1) array operations - 0 database queries in loop)
-            $allUsers = [];
-            $seenUsers = [];
-            $onlineCount = 0;
-            $offlineCount = 0;
-
-            foreach ($routerUsers as $ru) {
-                $uName = $ru['username'];
-                $svc = $ru['service'] ?: 'PPPoE';
-                $key = strtolower($uName) . '_' . strtolower($svc);
-                $seenUsers[$key] = true;
-                $seenUsers[strtolower($uName)] = true;
-                $fullname = $custMap[strtolower($uName)] ?? '';
-
-                if (isset($liveMap[$key]) || isset($liveMap[strtolower($uName)])) {
-                    $live = $liveMap[$key] ?? $liveMap[strtolower($uName)];
-                    $onlineCount++;
-                    $allUsers[] = [
-                        'username'        => $uName,
-                        'fullname'        => $fullname ?: ($live['fullname'] ?? ''),
-                        'session_id'      => $live['session_id'],
-                        'service'         => $live['service'] ?: $svc,
-                        'router_id'       => $currentRouter->id,
-                        'router_name'     => $currentRouter->name,
-                        'ip_address'      => $live['ip_address'],
-                        'mac_address'     => $live['mac_address'] ?: ($ru['mac_address'] ?: '-'),
-                        'start_time'      => $live['start_time'],
-                        'last_seen'       => $live['uptime_fmt'],
-                        'uptime_fmt'      => $live['uptime_fmt'],
-                        'uptime_seconds'  => $live['uptime_seconds'] ?? data_usage_uptime_to_seconds($live['uptime_fmt']),
-                        'bytes_in'        => $live['bytes_in'],
-                        'bytes_out'       => $live['bytes_out'],
-                        'total_bytes'     => $live['total_bytes'],
-                        'bytes_in_fmt'    => $live['bytes_in_fmt'],
-                        'bytes_out_fmt'   => $live['bytes_out_fmt'],
-                        'total_bytes_fmt' => $live['total_bytes_fmt'],
-                        'status'          => 'Online',
-                        'close_reason'    => '-'
-                    ];
-                } else {
-                    $offlineCount++;
-                    $lastTime = $lastSeenMap[strtolower($uName)] ?? '-';
-                    $allUsers[] = [
-                        'username'        => $uName,
-                        'fullname'        => $fullname,
-                        'session_id'      => '-',
-                        'service'         => $svc,
-                        'router_id'       => $currentRouter->id,
-                        'router_name'     => $currentRouter->name,
-                        'ip_address'      => '-',
-                        'mac_address'     => !empty($ru['mac_address']) ? $ru['mac_address'] : '-',
-                        'start_time'      => '-',
-                        'last_seen'       => $lastTime,
-                        'uptime_fmt'      => '-',
-                        'uptime_seconds'  => 0,
-                        'bytes_in'        => 0,
-                        'bytes_out'       => 0,
-                        'total_bytes'     => 0,
-                        'bytes_in_fmt'    => '0 B',
-                        'bytes_out_fmt'   => '0 B',
-                        'total_bytes_fmt' => '0 B',
-                        'status'          => 'Offline',
-                        'close_reason'    => 'Disconnected'
-                    ];
-                }
+                ->count();
+            if ($totalUsersCount < $onlineCount) {
+                $totalUsersCount = $onlineCount;
             }
+            $offlineCount = max(0, $totalUsersCount - $onlineCount);
 
-            // Include any active RouterOS sessions that were not in router_users table
-            foreach ($liveSessions as $ls) {
-                $key = strtolower($ls['username']) . '_' . strtolower($ls['service']);
-                if (!isset($seenUsers[$key]) && !isset($seenUsers[strtolower($ls['username'])])) {
-                    $onlineCount++;
-                    $seenUsers[$key] = true;
-                    $allUsers[] = array_merge($ls, [
-                        'fullname'        => $custMap[strtolower($ls['username'])] ?? ($ls['fullname'] ?? ''),
-                        'status'          => 'Online',
-                        'last_seen'       => $ls['uptime_fmt'],
-                        'uptime_seconds'  => $ls['uptime_seconds'] ?? data_usage_uptime_to_seconds($ls['uptime_fmt']),
-                        'close_reason'    => '-'
+            if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
+                header('Content-Type: application/json; charset=utf-8');
+                $draw = (int) ($_GET['draw'] ?? 1);
+                $start = max(0, (int) ($_GET['start'] ?? 0));
+                $length = (int) ($_GET['length'] ?? 10);
+                if ($length <= 0 || $length > 200) {
+                    $length = 10;
+                }
+                $searchVal = trim((string) ($_GET['search']['value'] ?? ''));
+                $svcFilter = trim((string) ($_GET['columns'][1]['search']['value'] ?? ''));
+                $statusFilter = trim((string) ($_GET['columns'][3]['search']['value'] ?? ''));
+                $orderCol = (int) ($_GET['order'][0]['column'] ?? 0);
+                $orderDir = strtolower((string) ($_GET['order'][0]['dir'] ?? 'asc')) === 'desc' ? 'desc' : 'asc';
+
+                $formatRow = function (array $s) {
+                    $uEsc = htmlspecialchars((string) $s['username'], ENT_QUOTES, 'UTF-8');
+                    $uUrl = urlencode((string) $s['username']);
+                    $rId = (int) $s['router_id'];
+                    $fnHtml = !empty($s['fullname']) ? '<br><small class="text-muted">' . htmlspecialchars((string) $s['fullname'], ENT_QUOTES, 'UTF-8') . '</small>' : '';
+                    $colUser = '<a href="' . getUrl('plugin/data_usage_user&username=' . $uUrl . '&router_id=' . $rId) . '" style="font-weight: 600;">' . $uEsc . '</a>' . $fnHtml;
+
+                    $svc = (string) ($s['service'] ?: 'PPPoE');
+                    $colSvc = $svc === 'PPPoE'
+                        ? '<span class="label label-primary">PPPoE</span>'
+                        : '<span class="label label-warning">' . htmlspecialchars($svc, ENT_QUOTES, 'UTF-8') . '</span>';
+
+                    $ipEsc = htmlspecialchars((string) ($s['ip_address'] ?? '-'), ENT_QUOTES, 'UTF-8');
+                    $macEsc = htmlspecialchars((string) ($s['mac_address'] ?? '-'), ENT_QUOTES, 'UTF-8');
+                    if ($s['status'] === 'Online') {
+                        $colIpMac = '<span style="font-family: monospace; font-size: 11px;">' . $ipEsc . '</span>';
+                        if (!empty($s['mac_address']) && $s['mac_address'] !== '-') {
+                            $colIpMac .= '<br><span class="text-muted" style="font-family: monospace; font-size: 11px;">' . $macEsc . '</span>';
+                        }
+                    } else {
+                        $colIpMac = (!empty($s['mac_address']) && $s['mac_address'] !== '-')
+                            ? '<span class="text-muted" style="font-family: monospace; font-size: 11px;">' . $macEsc . '</span>'
+                            : '<span class="text-muted">-</span>';
+                    }
+
+                    $colStatus = $s['status'] === 'Online'
+                        ? '<span class="label label-success">Online</span>'
+                        : '<span class="label label-default">Offline</span>';
+
+                    $colUptime = $s['status'] === 'Online'
+                        ? '<span class="text-primary" style="font-weight: 600;">' . htmlspecialchars((string) $s['uptime_fmt'], ENT_QUOTES, 'UTF-8') . '</span>'
+                        : '<span class="text-muted">-</span>';
+
+                    $colLastSeen = $s['status'] === 'Online'
+                        ? '<span class="label label-success">Now</span>'
+                        : '<small class="text-muted">' . htmlspecialchars((string) ($s['last_seen'] ?? '-'), ENT_QUOTES, 'UTF-8') . '</small>';
+
+                    $colIn = '<span class="text-info">' . htmlspecialchars((string) $s['bytes_in_fmt'], ENT_QUOTES, 'UTF-8') . '</span>';
+                    $colOut = '<span class="text-success">' . htmlspecialchars((string) $s['bytes_out_fmt'], ENT_QUOTES, 'UTF-8') . '</span>';
+                    $colTotal = '<strong>' . htmlspecialchars((string) $s['total_bytes_fmt'], ENT_QUOTES, 'UTF-8') . '</strong>';
+
+                    $uJs = htmlspecialchars(json_encode((string) $s['username']), ENT_QUOTES, 'UTF-8');
+                    $svcJs = htmlspecialchars(json_encode($svc), ENT_QUOTES, 'UTF-8');
+                    $sidJs = htmlspecialchars(json_encode((string) ($s['session_id'] ?? '-')), ENT_QUOTES, 'UTF-8');
+
+                    $colAct = '<div style="text-align: center; white-space: nowrap;">'
+                        . '<button type="button" class="btn btn-xs btn-primary" onclick="refreshRow(' . $uJs . ', ' . $rId . ', ' . $svcJs . ', this)">Refresh</button> ';
+                    if ($s['status'] === 'Online') {
+                        $colAct .= '<button type="button" class="btn btn-xs btn-danger" onclick="disconnectUser(' . $sidJs . ', ' . $rId . ', ' . $uJs . ')">Disconnect</button> ';
+                    }
+                    $colAct .= '<a href="' . getUrl('plugin/data_usage_user&username=' . $uUrl . '&router_id=' . $rId) . '" class="btn btn-xs btn-info">History</a></div>';
+
+                    $rowId = 'session_row_' . preg_replace('/[^a-zA-Z0-9_-]/', '_', (string) $s['username']);
+                    return [
+                        'DT_RowId' => $rowId,
+                        $colUser, $colSvc, $colIpMac, $colStatus, $colUptime, $colLastSeen, $colIn, $colOut, $colTotal, $colAct,
+                    ];
+                };
+
+                if (strcasecmp($statusFilter, 'Online') === 0) {
+                    $filtered = [];
+                    foreach ($liveSessions as $ls) {
+                        if ($svcFilter !== '' && strcasecmp((string) $ls['service'], $svcFilter) !== 0) {
+                            continue;
+                        }
+                        if ($searchVal !== '') {
+                            $hay = strtolower(($ls['username'] ?? '') . ' ' . ($ls['fullname'] ?? '') . ' ' . ($ls['ip_address'] ?? '') . ' ' . ($ls['mac_address'] ?? ''));
+                            if (strpos($hay, strtolower($searchVal)) === false) {
+                                continue;
+                            }
+                        }
+                        $filtered[] = [
+                            'username'        => $ls['username'],
+                            'fullname'        => $ls['fullname'] ?? '',
+                            'session_id'      => $ls['session_id'] ?? '-',
+                            'service'         => $ls['service'] ?: 'PPPoE',
+                            'router_id'       => $currentRouter->id,
+                            'ip_address'      => $ls['ip_address'] ?? '-',
+                            'mac_address'     => $ls['mac_address'] ?? '-',
+                            'last_seen'       => $ls['uptime_fmt'] ?? '-',
+                            'uptime_fmt'      => $ls['uptime_fmt'] ?? '-',
+                            'uptime_seconds'  => $ls['uptime_seconds'] ?? data_usage_uptime_to_seconds($ls['uptime_fmt'] ?? ''),
+                            'bytes_in'        => (float) ($ls['bytes_in'] ?? 0),
+                            'bytes_out'       => (float) ($ls['bytes_out'] ?? 0),
+                            'total_bytes'     => (float) ($ls['total_bytes'] ?? 0),
+                            'bytes_in_fmt'    => $ls['bytes_in_fmt'] ?? '0 B',
+                            'bytes_out_fmt'   => $ls['bytes_out_fmt'] ?? '0 B',
+                            'total_bytes_fmt' => $ls['total_bytes_fmt'] ?? '0 B',
+                            'status'          => 'Online',
+                        ];
+                    }
+                    usort($filtered, function ($a, $b) use ($orderCol, $orderDir) {
+                        $cmp = 0;
+                        switch ($orderCol) {
+                            case 1: $cmp = strcasecmp($a['service'], $b['service']); break;
+                            case 4: $cmp = $a['uptime_seconds'] <=> $b['uptime_seconds']; break;
+                            case 6: $cmp = $a['bytes_in'] <=> $b['bytes_in']; break;
+                            case 7: $cmp = $a['bytes_out'] <=> $b['bytes_out']; break;
+                            case 8: $cmp = $a['total_bytes'] <=> $b['total_bytes']; break;
+                            default: $cmp = strcasecmp($a['username'], $b['username']); break;
+                        }
+                        return $orderDir === 'desc' ? -$cmp : $cmp;
+                    });
+                    $recordsFiltered = count($filtered);
+                    $pageRows = array_slice($filtered, $start, $length);
+                    $custMap = data_usage_batch_customers(array_column($pageRows, 'username'));
+                    $outData = [];
+                    foreach ($pageRows as $pr) {
+                        if (empty($pr['fullname'])) {
+                            $pr['fullname'] = $custMap[strtolower($pr['username'])] ?? '';
+                        }
+                        $outData[] = $formatRow($pr);
+                    }
+                    echo json_encode([
+                        'draw' => $draw,
+                        'recordsTotal' => $totalUsersCount,
+                        'recordsFiltered' => $recordsFiltered,
+                        'data' => $outData,
                     ]);
+                    exit;
                 }
+
+                // All or Offline: query tbl_data_usage_router_users with SQL LIMIT/OFFSET
+                $where = ["router_id = ?", "missing_since IS NULL"];
+                $params = [$currentRouter->id];
+                if ($svcFilter !== '') {
+                    $where[] = "service = ?";
+                    $params[] = $svcFilter;
+                }
+                if ($searchVal !== '') {
+                    $where[] = "(username LIKE ? OR mac_address LIKE ?)";
+                    $params[] = '%' . $searchVal . '%';
+                    $params[] = '%' . $searchVal . '%';
+                }
+                if (strcasecmp($statusFilter, 'Offline') === 0 && !empty($onlineKeys)) {
+                    $onlineNames = array_keys($onlineKeys);
+                    if (count($onlineNames) <= 2000) {
+                        $placeholders = implode(',', array_fill(0, count($onlineNames), '?'));
+                        $where[] = "LOWER(username) NOT IN ($placeholders)";
+                        foreach ($onlineNames as $onName) {
+                            $params[] = $onName;
+                        }
+                    }
+                }
+                $whereSql = implode(' AND ', $where);
+                $db = ORM::get_db();
+                $cntStmt = $db->prepare("SELECT COUNT(*) FROM tbl_data_usage_router_users WHERE $whereSql");
+                $cntStmt->execute($params);
+                $recordsFiltered = (int) $cntStmt->fetchColumn();
+
+                $sortColSql = $orderCol === 1 ? 'service' : 'username';
+                $sortDirSql = $orderDir === 'desc' ? 'DESC' : 'ASC';
+                $dataStmt = $db->prepare("SELECT username, service, mac_address FROM tbl_data_usage_router_users WHERE $whereSql ORDER BY $sortColSql $sortDirSql LIMIT $length OFFSET $start");
+                $dataStmt->execute($params);
+                $ruRows = $dataStmt->fetchAll(PDO::FETCH_ASSOC);
+
+                $pageUsernames = array_column($ruRows, 'username');
+                $custMap = data_usage_batch_customers($pageUsernames);
+                $lastSeenMap = [];
+                if (!empty($pageUsernames)) {
+                    $ph = implode(',', array_fill(0, count($pageUsernames), '?'));
+                    $lsStmt = $db->prepare("SELECT username, MAX(COALESCE(closed_time, last_seen)) AS last_time FROM tbl_data_usage_sessions WHERE router_id = ? AND username IN ($ph) GROUP BY username");
+                    $lsStmt->execute(array_merge([$currentRouter->id], $pageUsernames));
+                    foreach ($lsStmt->fetchAll(PDO::FETCH_ASSOC) as $ss) {
+                        $lastSeenMap[strtolower($ss['username'])] = $ss['last_time'];
+                    }
+                }
+
+                $outData = [];
+                foreach ($ruRows as $ru) {
+                    $uName = $ru['username'];
+                    $svc = $ru['service'] ?: 'PPPoE';
+                    $key = strtolower($uName) . '_' . strtolower($svc);
+                    $fullname = $custMap[strtolower($uName)] ?? '';
+                    if (isset($liveMap[$key]) || isset($liveMap[strtolower($uName)])) {
+                        $live = $liveMap[$key] ?? $liveMap[strtolower($uName)];
+                        $row = [
+                            'username'        => $uName,
+                            'fullname'        => $fullname ?: ($live['fullname'] ?? ''),
+                            'session_id'      => $live['session_id'],
+                            'service'         => $live['service'] ?: $svc,
+                            'router_id'       => $currentRouter->id,
+                            'ip_address'      => $live['ip_address'],
+                            'mac_address'     => $live['mac_address'] ?: ($ru['mac_address'] ?: '-'),
+                            'last_seen'       => $live['uptime_fmt'],
+                            'uptime_fmt'      => $live['uptime_fmt'],
+                            'bytes_in_fmt'    => $live['bytes_in_fmt'],
+                            'bytes_out_fmt'   => $live['bytes_out_fmt'],
+                            'total_bytes_fmt' => $live['total_bytes_fmt'],
+                            'status'          => 'Online',
+                        ];
+                    } else {
+                        $row = [
+                            'username'        => $uName,
+                            'fullname'        => $fullname,
+                            'session_id'      => '-',
+                            'service'         => $svc,
+                            'router_id'       => $currentRouter->id,
+                            'ip_address'      => '-',
+                            'mac_address'     => !empty($ru['mac_address']) ? $ru['mac_address'] : '-',
+                            'last_seen'       => $lastSeenMap[strtolower($uName)] ?? '-',
+                            'uptime_fmt'      => '-',
+                            'bytes_in_fmt'    => '0 B',
+                            'bytes_out_fmt'   => '0 B',
+                            'total_bytes_fmt' => '0 B',
+                            'status'          => 'Offline',
+                        ];
+                    }
+                    $outData[] = $formatRow($row);
+                }
+
+                echo json_encode([
+                    'draw' => $draw,
+                    'recordsTotal' => $totalUsersCount,
+                    'recordsFiltered' => $recordsFiltered,
+                    'data' => $outData,
+                ]);
+                exit;
             }
 
-            $sessionsFormatted = $allUsers;
-            $totalUsersCount = count($allUsers);
+            $sessionsFormatted = [];
             $ui->assign('routerIsOnline', $routerIsOnline);
             $ui->assign('onlineCount', $onlineCount);
             $ui->assign('offlineCount', $offlineCount);
@@ -1556,9 +1718,102 @@ function data_usage_history()
         $query->order_by_desc($dbSortCol);
     }
 
-    $historyRows = $query->find_many();
+    $routerMap = [];
+    foreach ($routers as $r) {
+        $routerMap[$r->id] = $r->name;
+    }
 
-    // Totals in selected range
+    if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
+        header('Content-Type: application/json; charset=utf-8');
+        $draw = (int) ($_GET['draw'] ?? 1);
+        $start = max(0, (int) ($_GET['start'] ?? 0));
+        $length = (int) ($_GET['length'] ?? 10);
+        if ($length <= 0 || $length > 200) {
+            $length = 10;
+        }
+        $dtSearch = trim((string) ($_GET['search']['value'] ?? ''));
+        $colIdx = (int) ($_GET['order'][0]['column'] ?? 0);
+        $colDir = strtolower((string) ($_GET['order'][0]['dir'] ?? 'desc')) === 'asc' ? 'ASC' : 'DESC';
+        $colMap = [
+            0 => 'usage_date',
+            1 => 'username',
+            2 => 'service',
+            3 => 'router_id',
+            4 => 'mac_address',
+            5 => 'bytes_in',
+            6 => 'bytes_out',
+            7 => 'total_bytes',
+        ];
+        $sortSql = ($colMap[$colIdx] ?? 'usage_date') . ' ' . $colDir;
+
+        $where = ["usage_date >= ?", "usage_date <= ?"];
+        $params = [$startDate, $endDate];
+        if ($filterRouter > 0) {
+            $where[] = "router_id = ?";
+            $params[] = $filterRouter;
+        }
+        if (!empty($filterService)) {
+            $where[] = "service = ?";
+            $params[] = $filterService;
+        }
+        $effectiveSearch = $dtSearch !== '' ? $dtSearch : $search;
+        if ($effectiveSearch !== '') {
+            $where[] = "(username LIKE ? OR mac_address LIKE ?)";
+            $params[] = "%$effectiveSearch%";
+            $params[] = "%$effectiveSearch%";
+        }
+        $whereSql = implode(' AND ', $where);
+        $db = ORM::get_db();
+
+        $totalStmt = $db->prepare("SELECT COUNT(*) FROM tbl_data_usage_daily WHERE usage_date >= ? AND usage_date <= ?");
+        $totalStmt->execute([$startDate, $endDate]);
+        $recordsTotal = (int) $totalStmt->fetchColumn();
+
+        $cntStmt = $db->prepare("SELECT COUNT(*) FROM tbl_data_usage_daily WHERE $whereSql");
+        $cntStmt->execute($params);
+        $recordsFiltered = (int) $cntStmt->fetchColumn();
+
+        $dataStmt = $db->prepare("SELECT usage_date, router_id, username, service, mac_address, bytes_in, bytes_out, total_bytes FROM tbl_data_usage_daily WHERE $whereSql ORDER BY $sortSql LIMIT $length OFFSET $start");
+        $dataStmt->execute($params);
+        $rows = $dataStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $custMap = data_usage_batch_customers(array_column($rows, 'username'));
+        $outData = [];
+        foreach ($rows as $h) {
+            $uEsc = htmlspecialchars((string) $h['username'], ENT_QUOTES, 'UTF-8');
+            $uUrl = urlencode((string) $h['username']);
+            $fullname = $custMap[strtolower($h['username'])] ?? '';
+            $fnHtml = $fullname !== '' ? '<br><small class="text-muted">' . htmlspecialchars((string) $fullname, ENT_QUOTES, 'UTF-8') . '</small>' : '';
+            $svc = (string) ($h['service'] ?: 'PPPoE');
+            $svcHtml = $svc === 'PPPoE'
+                ? '<span class="label label-primary">PPPoE</span>'
+                : '<span class="label label-warning">' . htmlspecialchars($svc, ENT_QUOTES, 'UTF-8') . '</span>';
+            $rName = htmlspecialchars((string) ($routerMap[$h['router_id']] ?? ('Router #' . $h['router_id'])), ENT_QUOTES, 'UTF-8');
+            $macHtml = '<span style="font-family: monospace; font-size: 11px;">' . htmlspecialchars((string) $h['mac_address'], ENT_QUOTES, 'UTF-8') . '</span>';
+
+            $outData[] = [
+                htmlspecialchars((string) $h['usage_date'], ENT_QUOTES, 'UTF-8'),
+                '<a href="' . getUrl('plugin/data_usage_user&username=' . $uUrl) . '" style="font-weight: 600;">' . $uEsc . '</a>' . $fnHtml,
+                $svcHtml,
+                $rName,
+                $macHtml,
+                '<span class="text-info">' . htmlspecialchars(data_usage_format_bytes($h['bytes_in']), ENT_QUOTES, 'UTF-8') . '</span>',
+                '<span class="text-success">' . htmlspecialchars(data_usage_format_bytes($h['bytes_out']), ENT_QUOTES, 'UTF-8') . '</span>',
+                '<strong>' . htmlspecialchars(data_usage_format_bytes($h['total_bytes']), ENT_QUOTES, 'UTF-8') . '</strong>',
+                '<div class="text-center"><a href="' . getUrl('plugin/data_usage_user&username=' . $uUrl) . '" class="btn btn-xs btn-info">Details</a></div>',
+            ];
+        }
+
+        echo json_encode([
+            'draw' => $draw,
+            'recordsTotal' => $recordsTotal,
+            'recordsFiltered' => $recordsFiltered,
+            'data' => $outData,
+        ]);
+        exit;
+    }
+
+    // Totals in selected range (fast SQL SUM)
     $rangeSumSql = "SELECT SUM(bytes_in) as total_in, SUM(bytes_out) as total_out, SUM(total_bytes) as total_all 
                     FROM tbl_data_usage_daily WHERE usage_date >= :s AND usage_date <= :e";
     $rangeParams = ['s' => $startDate, 'e' => $endDate];
@@ -1579,23 +1834,7 @@ function data_usage_history()
     $rangeIn = $rangeRow ? (float)$rangeRow->total_in : 0;
     $rangeOut = $rangeRow ? (float)$rangeRow->total_out : 0;
 
-    $routerMap = [];
-    foreach ($routers as $r) {
-        $routerMap[$r->id] = $r->name;
-    }
-
     $historyFormatted = [];
-    foreach ($historyRows as $h) {
-        $item = $h->as_array();
-        $item['router_name'] = $routerMap[$h->router_id] ?? ('Router #' . $h->router_id);
-        $item['bytes_in_fmt'] = data_usage_format_bytes($h->bytes_in);
-        $item['bytes_out_fmt'] = data_usage_format_bytes($h->bytes_out);
-        $item['total_bytes_fmt'] = data_usage_format_bytes($h->total_bytes);
-
-        $cust = ORM::for_table('tbl_customers')->where('username', $h->username)->find_one();
-        $item['fullname'] = $cust ? $cust->fullname : '';
-        $historyFormatted[] = $item;
-    }
 
     $ui->assign('routers', $routers);
     $ui->assign('startDate', $startDate);
@@ -3077,13 +3316,18 @@ function data_usage_export()
     $endDate = isset($_GET['end_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($_GET['end_date'])) ? trim($_GET['end_date']) : date('Y-m-d');
     $filterRouter = isset($_GET['router']) ? (int)$_GET['router'] : 0;
 
-    $query = ORM::for_table('tbl_data_usage_daily')
-        ->where_gte('usage_date', $startDate)
-        ->where_lte('usage_date', $endDate);
+    $sql = "SELECT usage_date, router_id, username, service, mac_address, bytes_in, bytes_out, total_bytes
+            FROM tbl_data_usage_daily
+            WHERE usage_date >= ? AND usage_date <= ?";
+    $params = [$startDate, $endDate];
+    if ($filterRouter > 0) {
+        $sql .= " AND router_id = ?";
+        $params[] = $filterRouter;
+    }
+    $sql .= " ORDER BY usage_date DESC";
 
-    if ($filterRouter > 0) $query->where('router_id', $filterRouter);
-
-    $rows = $query->order_by_desc('usage_date')->find_many();
+    $stmt = ORM::get_db()->prepare($sql);
+    $stmt->execute($params);
 
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename=data_usage_' . $startDate . '_to_' . $endDate . '.csv');
@@ -3091,19 +3335,19 @@ function data_usage_export()
     $out = fopen('php://output', 'w');
     fputcsv($out, ['Date', 'Router ID', 'Username', 'Service', 'MAC Address', 'Upload (Bytes)', 'Download (Bytes)', 'Total (Bytes)', 'Upload (Formatted)', 'Download (Formatted)', 'Total (Formatted)']);
 
-    foreach ($rows as $r) {
+    while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
         fputcsv($out, [
-            $r->usage_date,
-            $r->router_id,
-            $r->username,
-            $r->service,
-            $r->mac_address,
-            $r->bytes_in,
-            $r->bytes_out,
-            $r->total_bytes,
-            data_usage_format_bytes($r->bytes_in),
-            data_usage_format_bytes($r->bytes_out),
-            data_usage_format_bytes($r->total_bytes)
+            $r['usage_date'],
+            $r['router_id'],
+            $r['username'],
+            $r['service'],
+            $r['mac_address'],
+            $r['bytes_in'],
+            $r['bytes_out'],
+            $r['total_bytes'],
+            data_usage_format_bytes($r['bytes_in']),
+            data_usage_format_bytes($r['bytes_out']),
+            data_usage_format_bytes($r['total_bytes'])
         ]);
     }
     fclose($out);
