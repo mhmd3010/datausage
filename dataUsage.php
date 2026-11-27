@@ -161,6 +161,28 @@ function data_usage_set_config($key, $value)
     $row->save();
 }
 
+function data_usage_require_admin()
+{
+    _admin();
+    $admin = Admin::_info();
+    if (!in_array($admin['user_type'] ?? '', ['SuperAdmin', 'Admin'], true)) {
+        _alert(Lang::T('You do not have permission to access this page'), 'danger', 'dashboard');
+    }
+    return $admin;
+}
+
+function data_usage_get_webhook_token()
+{
+    return trim((string) data_usage_get_config('data_usage_webhook_token', ''));
+}
+
+function data_usage_webhook_url($appUrl = null)
+{
+    $base = rtrim($appUrl !== null ? $appUrl : APP_URL, '/') . '/?_route=plugin/data_usage_webhook';
+    $token = data_usage_get_webhook_token();
+    return $token !== '' ? $base . '&token=' . rawurlencode($token) : $base;
+}
+
 /**
  * Event & Activity Logger Helper
  */
@@ -433,6 +455,16 @@ function data_usage_webhook()
     // Read POST or GET data (support raw JSON payload as well)
     $input = file_get_contents('php://input');
     $json = json_decode($input, true) ?: [];
+
+    $expectedToken = data_usage_get_webhook_token();
+    if ($expectedToken !== '') {
+        $providedToken = (string) ($_POST['token'] ?? $json['token'] ?? $_GET['token'] ?? $_SERVER['HTTP_X_WEBHOOK_TOKEN'] ?? '');
+        if ($providedToken === '' || !hash_equals($expectedToken, $providedToken)) {
+            http_response_code(403);
+            echo json_encode(['status' => 'error', 'message' => 'Unauthorized webhook token']);
+            exit;
+        }
+    }
 
     $action          = $_POST['action'] ?? $json['action'] ?? $_GET['action'] ?? '';
     $routerId        = (int)($_POST['router'] ?? $_POST['router_id'] ?? $json['router'] ?? $json['router_id'] ?? $_GET['router'] ?? 0);
@@ -1261,7 +1293,7 @@ function data_usage_view($template)
 function data_usage_admin()
 {
     global $ui;
-    _admin();
+    data_usage_require_admin();
     $admin = Admin::_info();
     data_usage_init_db();
 
@@ -1471,7 +1503,7 @@ function data_usage_admin()
 function data_usage_history()
 {
     global $ui;
-    _admin();
+    data_usage_require_admin();
     $admin = Admin::_info();
     data_usage_init_db();
 
@@ -1482,8 +1514,8 @@ function data_usage_history()
     $ui->assign('xheader', '<link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.11.3/css/dataTables.bootstrap.min.css">');
     $ui->assign('xfooter', '<script src="https://cdn.datatables.net/1.11.3/js/jquery.dataTables.min.js"></script><script src="https://cdn.datatables.net/1.11.3/js/dataTables.bootstrap.min.js"></script>');
 
-    $startDate = isset($_GET['start_date']) && !empty($_GET['start_date']) ? trim($_GET['start_date']) : date('Y-m-01');
-    $endDate = isset($_GET['end_date']) && !empty($_GET['end_date']) ? trim($_GET['end_date']) : date('Y-m-d');
+    $startDate = isset($_GET['start_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($_GET['start_date'])) ? trim($_GET['start_date']) : date('Y-m-01');
+    $endDate = isset($_GET['end_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($_GET['end_date'])) ? trim($_GET['end_date']) : date('Y-m-d');
     $filterRouter = isset($_POST['router']) ? (int)$_POST['router'] : (isset($_GET['router']) ? (int)$_GET['router'] : 0);
     $filterService = isset($_POST['service']) ? trim($_POST['service']) : (isset($_GET['service']) ? trim($_GET['service']) : '');
     $search = isset($_POST['search']) ? trim($_POST['search']) : (isset($_GET['search']) ? trim($_GET['search']) : '');
@@ -1591,7 +1623,7 @@ function data_usage_history()
 function data_usage_user()
 {
     global $ui;
-    _admin();
+    data_usage_require_admin();
     $admin = Admin::_info();
     data_usage_init_db();
 
@@ -1755,7 +1787,7 @@ function data_usage_user()
 function data_usage_scripts()
 {
     global $ui;
-    _admin();
+    data_usage_require_admin();
     $admin = Admin::_info();
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_traffic_settings'])) {
@@ -1778,7 +1810,7 @@ function data_usage_scripts()
     $selectedRouterId = isset($_GET['router_id']) ? (int)$_GET['router_id'] : ($routers[0]->id ?? 1);
 
     $appUrl = rtrim(APP_URL, '/');
-    $webhookUrl = $appUrl . '/?_route=plugin/data_usage_webhook';
+    $webhookUrl = data_usage_webhook_url($appUrl);
 
     $targetRouter = ORM::for_table('tbl_routers')->where('enabled', '1')->find_one($selectedRouterId);
     $pppProfiles = [];
@@ -1849,7 +1881,7 @@ function data_usage_scripts()
  */
 function data_usage_manage_profile_scripts()
 {
-    _admin();
+    data_usage_require_admin();
     $csrf_token = $_POST['csrf_token'] ?? '';
     if (!Csrf::check($csrf_token)) {
         r2(getUrl('plugin/data_usage_scripts'), 'e', 'Security token expired. Please try again.');
@@ -1879,7 +1911,7 @@ function data_usage_manage_profile_scripts()
     }
 
     $appUrl = rtrim(APP_URL, '/');
-    $webhookUrl = $appUrl . '/?_route=plugin/data_usage_webhook';
+    $webhookUrl = data_usage_webhook_url($appUrl);
 
     // Script definitions
     $pppOnUp = ':delay 1s;' . "\n"
@@ -1972,7 +2004,7 @@ function data_usage_manage_profile_scripts()
 function data_usage_logs()
 {
     global $ui;
-    _admin();
+    data_usage_require_admin();
     $admin = Admin::_info();
     data_usage_init_db();
 
@@ -2029,7 +2061,7 @@ function data_usage_logs()
  */
 function data_usage_clear_logs()
 {
-    _admin();
+    data_usage_require_admin();
     $csrf_token = $_POST['csrf_token'] ?? $_GET['csrf_token'] ?? '';
     if (!Csrf::check($csrf_token)) {
         r2(getUrl('plugin/data_usage_logs'), 'e', 'Security token expired. Please try again.');
@@ -2055,7 +2087,7 @@ function data_usage_clear_logs()
  */
 function data_usage_live_status()
 {
-    _admin();
+    data_usage_require_admin();
     session_write_close();
     data_usage_init_db();
     header('Content-Type: application/json; charset=utf-8');
@@ -2412,7 +2444,7 @@ function data_usage_query_live_user_status($router, $username, $service = 'all')
  */
 function data_usage_async_routers_status()
 {
-    _admin();
+    data_usage_require_admin();
     session_write_close();
     header('Content-Type: application/json; charset=utf-8');
 
@@ -2442,7 +2474,7 @@ function data_usage_async_routers_status()
 function data_usage_live_traffic()
 {
     if (php_sapi_name() !== 'cli') {
-        _admin();
+        data_usage_require_admin();
     }
     if (session_status() === PHP_SESSION_ACTIVE) {
         session_write_close();
@@ -2734,7 +2766,7 @@ function data_usage_auto_prune_logs()
 function data_usage_sync()
 {
     if (php_sapi_name() !== 'cli') {
-        _admin();
+        data_usage_require_admin();
     }
     data_usage_init_db();
 
@@ -3038,11 +3070,11 @@ function data_usage_sync()
  */
 function data_usage_export()
 {
-    _admin();
+    data_usage_require_admin();
     data_usage_init_db();
 
-    $startDate = isset($_GET['start_date']) && !empty($_GET['start_date']) ? trim($_GET['start_date']) : date('Y-m-01');
-    $endDate = isset($_GET['end_date']) && !empty($_GET['end_date']) ? trim($_GET['end_date']) : date('Y-m-d');
+    $startDate = isset($_GET['start_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($_GET['start_date'])) ? trim($_GET['start_date']) : date('Y-m-01');
+    $endDate = isset($_GET['end_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($_GET['end_date'])) ? trim($_GET['end_date']) : date('Y-m-d');
     $filterRouter = isset($_GET['router']) ? (int)$_GET['router'] : 0;
 
     $query = ORM::for_table('tbl_data_usage_daily')
@@ -3083,7 +3115,7 @@ function data_usage_export()
  */
 function data_usage_disconnect()
 {
-    _admin();
+    data_usage_require_admin();
     $sessionId = isset($_POST['session_id']) ? trim($_POST['session_id']) : '';
     $routerId = isset($_POST['router_id']) ? (int)$_POST['router_id'] : 0;
     $username = isset($_POST['username']) ? trim($_POST['username']) : '';
@@ -3095,6 +3127,10 @@ function data_usage_disconnect()
         $redirectUrl = getUrl('plugin/data_usage_admin&router=' . $routerId);
     } else {
         $redirectUrl = getUrl('plugin/data_usage_admin');
+    }
+
+    if (!Csrf::check($_POST['csrf_token'] ?? '')) {
+        r2($redirectUrl, 'e', 'Security token expired. Please try again.');
     }
 
     if (empty($sessionId) && empty($username)) {
@@ -3184,7 +3220,7 @@ function data_usage_disconnect()
 function data_usage_generate_poller_source($routerId)
 {
     $appUrl = rtrim(APP_URL, '/');
-    $webhookUrl = $appUrl . '/?_route=plugin/data_usage_webhook';
+    $webhookUrl = data_usage_webhook_url($appUrl);
 
     return ':local routerId "' . (int)$routerId . '";' . "\n"
         . ':local serverUrl "' . $webhookUrl . '";' . "\n"
@@ -3301,7 +3337,7 @@ function data_usage_install_poller_to_router($router)
 
 function data_usage_install_poller()
 {
-    _admin();
+    data_usage_require_admin();
     $csrf_token = $_POST['csrf_token'] ?? $_GET['csrf_token'] ?? '';
     if (!Csrf::check($csrf_token)) {
         r2(getUrl('plugin/data_usage_scripts'), 'e', 'Security token expired. Please try again.');
@@ -3389,7 +3425,7 @@ function data_usage_remove_poller_from_router($router)
 
 function data_usage_remove_poller()
 {
-    _admin();
+    data_usage_require_admin();
     $csrf_token = $_POST['csrf_token'] ?? $_GET['csrf_token'] ?? '';
     if (!Csrf::check($csrf_token)) {
         r2(getUrl('plugin/data_usage_scripts'), 'e', 'Security token expired. Please try again.');
