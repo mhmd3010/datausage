@@ -3300,6 +3300,7 @@ function data_usage_sync()
     data_usage_log('cron-sync', $msg, !empty($errors) ? 'warning' : 'success', $routerId);
 
     if (php_sapi_name() === 'cli') {
+        data_usage_set_config('data_usage_last_cron_run', date('Y-m-d H:i:s'));
         echo $msg . PHP_EOL;
         return;
     }
